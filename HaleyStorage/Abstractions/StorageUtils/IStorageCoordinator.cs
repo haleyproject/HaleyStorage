@@ -9,6 +9,11 @@ namespace Haley.Abstractions {
         IStorageCoordinator SetConfig(IVaultRegistryConfig config);
         bool ThrowExceptions { get; }
         string GetStorageRoot();
+        /// <summary>
+        /// Resolves a request's provider-relative file reference into the provider path used for I/O.
+        /// The returned base path and target path are not persistence values.
+        /// </summary>
+        (string basePath, string targetPath) ProcessAndBuildStoragePath(IVaultReadRequest input, bool allowRootAccess = false);
         bool WriteMode { get; }
         /// <summary>
         /// Evaluates the global and configured module/workspace write policy for a request.

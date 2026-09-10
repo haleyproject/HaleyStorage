@@ -62,8 +62,8 @@ namespace Haley.Utils {
         }
 
         /// <summary>
-        /// Loads a workspace and its parent module from the persisted registry after a cache miss.
-        /// This allows storage and admin processes to share registry changes without seed duplication.
+        /// Loads a workspace from the persisted registry after a cache miss, but only when its
+        /// module adapter is already active in this process. Module activation remains explicit.
         /// </summary>
         public async Task<bool> HydrateWorkspaceAsync(string workspaceCuid, bool forceRefresh = false) {
             if (string.IsNullOrWhiteSpace(workspaceCuid)) return false;
@@ -85,7 +85,9 @@ namespace Haley.Utils {
                 || string.IsNullOrWhiteSpace(moduleCuid))
                 return false;
 
-            await HydrateModuleAsync(moduleCuid);
+            if (!IsModuleAdapterRegistered(moduleCuid)
+                || !TryGetComponentInfo<VaultModule>(moduleCuid, out _))
+                return false;
 
             var isVirtual = ReadRegistryBoolean(row, "is_virtual");
             var caseSensitive = ReadRegistryBoolean(row, "case_sensitive");
@@ -107,6 +109,18 @@ namespace Haley.Utils {
                 await HydrateWorkspaceProfileAsync(workspaceCuid, (int)workspaceProfileId);
 
             return true;
+        }
+
+        public async Task<bool> HydrateWorkspaceByIdAsync(long workspaceId, bool forceRefresh = false) {
+            if (workspaceId < 1) return false;
+            await EnsureValidation();
+            var workspaceCuid = await _agw.ScalarAsync<string>(
+                _key,
+                WORKSPACE.GET_CUID_BY_ID,
+                default,
+                (ID, workspaceId));
+            return !string.IsNullOrWhiteSpace(workspaceCuid)
+                && await HydrateWorkspaceAsync(workspaceCuid, forceRefresh);
         }
 
         static bool ReadRegistryBoolean(DbRow row, string key) {

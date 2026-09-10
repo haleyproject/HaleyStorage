@@ -31,6 +31,7 @@ namespace Haley.Services {
         /// </summary>
         public (string basePath, string targetPath) ProcessAndBuildStoragePath(IVaultReadRequest input, bool allowRootAccess = false) {
             PrepareRequestContext(input);                          // 1. Normalise CUID, mark virtual folder
+            ResolveTargetWorkspaceContextAsync(input).GetAwaiter().GetResult();
             EnsureWorkspaceContextAsync(input).GetAwaiter().GetResult();
             var provider = ResolveProvider(input);                 // 2. Resolve provider once for all steps
             var bpath = FetchWorkspaceBasePath(input, provider);   // 3. Resolve workspace base path (cached)
@@ -73,6 +74,41 @@ namespace Haley.Services {
             // Workspace CUID is always re-derived deterministically from names.
             input.Scope?.Workspace.SetCuid(StorageUtils.GenerateCuid(input, Enums.VaultObjectType.WorkSpace));
             // All folders are virtual (DB-only). No physical directory marking needed.
+        }
+
+        /// <summary>
+        /// Rebinds an ID-based file request to the workspace persisted on its document. A uid/ruid is
+        /// authoritative; a missing or stale caller workspace must not redirect the physical read.
+        /// </summary>
+        async Task ResolveTargetWorkspaceContextAsync(IVaultReadRequest input) {
+            if (Indexer == null || input is not IVaultFileReadRequest fileRequest || fileRequest.File == null)
+                return;
+
+            var file = fileRequest.File;
+            var rootCuid = (file as StorageFileRoute)?.RootCuid;
+            if (file.Id < 1 && string.IsNullOrWhiteSpace(file.Cuid) && string.IsNullOrWhiteSpace(rootCuid))
+                return;
+
+            var moduleCuid = input.Scope?.Module?.Cuid.ToString("N");
+            if (string.IsNullOrWhiteSpace(moduleCuid)) return;
+
+            var workspaceId = await Indexer.GetTargetWorkspaceId(
+                moduleCuid,
+                file.Id > 0 ? file.Id : null,
+                file.Cuid,
+                rootCuid);
+            if (workspaceId < 1) return;
+
+            var workspace = Indexer.GetAllComponents<VaultWorkSpace>()
+                .FirstOrDefault(candidate => candidate.Id == workspaceId);
+            if (workspace == null) {
+                await Indexer.HydrateWorkspaceByIdAsync(workspaceId);
+                workspace = Indexer.GetAllComponents<VaultWorkSpace>()
+                    .FirstOrDefault(candidate => candidate.Id == workspaceId);
+            }
+
+            if (workspace != null)
+                input.Scope.Workspace = workspace;
         }
 
         // ─────────────────────────────────────────────────────────────────────

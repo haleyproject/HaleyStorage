@@ -62,6 +62,7 @@ namespace Haley.Services {
         bool TryGetComponentInfo<T>(string key, out T component) where T : IVaultObject;
         Task<bool> HydrateModuleAsync(string moduleCuid);
         Task<bool> HydrateWorkspaceAsync(string workspaceCuid, bool forceRefresh = false);
+        Task<bool> HydrateWorkspaceByIdAsync(long workspaceId, bool forceRefresh = false);
         bool IsModuleAdapterRegistered(string moduleCuid);
         Task<IReadOnlyList<string>> GetWorkspaceCuidsAsync(string moduleCuid);
         bool TryAddInfo(IVaultObject dirInfo, bool replace = false);

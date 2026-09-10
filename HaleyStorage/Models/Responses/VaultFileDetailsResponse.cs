@@ -12,6 +12,7 @@ namespace Haley.Models {
         public long DocumentActorId { get; set; }
         public long WorkspaceId { get; set; }
         public string WorkspaceCuid { get; set; } = string.Empty;
+        public string WorkspaceName { get; set; } = string.Empty;
         public long DirectoryId { get; set; }
         public string DirectoryCuid { get; set; } = string.Empty;
         public string DirectoryName { get; set; } = string.Empty;

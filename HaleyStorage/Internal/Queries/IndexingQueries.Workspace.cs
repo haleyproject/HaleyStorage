@@ -5,6 +5,7 @@ namespace Haley.Internal {
         public class WORKSPACE {
             public const string EXISTS = $@"select ws.id from workspace as ws where ws.name = {NAME} and ws.parent = {PARENT} LIMIT 1;";
             public const string EXISTS_BY_CUID = $@"select ws.id from workspace as ws where ws.cuid = {CUID} LIMIT 1;";
+            public const string GET_CUID_BY_ID = $@"select ws.cuid from workspace as ws where ws.id = {ID} LIMIT 1;";
             public const string GET_CUIDS_BY_MODULE_CUID = $@"select ws.cuid
                                                               from workspace as ws
                                                               inner join module as m on m.id = ws.parent

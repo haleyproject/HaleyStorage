@@ -61,7 +61,8 @@ namespace Haley.Services {
 
                 long versionId   = writeReq.File.Id;
                 string versionCuid = writeReq.File.Cuid;
-                string storageRef  = writeReq.OverrideRef;   // full path (FS) or object key (cloud)
+                string storagePath = writeReq.OverrideRef;   // full path (FS) or scoped object key (cloud)
+                string storageRef  = writeReq.File.StorageRef; // provider-relative reference persisted in version_info
                 string storageName = writeReq.File.StorageName;
                 var resolvedProvider = ResolveProvider(writeReq);
 
@@ -75,8 +76,8 @@ namespace Haley.Services {
                 }
 
                 // ── FS: pre-create the shard directory ────────────────────────
-                if (resolvedProvider is FileSystemStorageProvider && !string.IsNullOrWhiteSpace(storageRef)) {
-                    var dir = Path.GetDirectoryName(storageRef);
+                if (resolvedProvider is FileSystemStorageProvider && !string.IsNullOrWhiteSpace(storagePath)) {
+                    var dir = Path.GetDirectoryName(storagePath);
                     if (!string.IsNullOrWhiteSpace(dir))
                         Directory.CreateDirectory(dir);
                 }
@@ -101,7 +102,7 @@ namespace Haley.Services {
                 if (!string.IsNullOrWhiteSpace(displayName))
                     await Indexer.UpdateDocDisplayName(moduleCuid, versionId, displayName);
 
-                return fb.SetStatus(true).SetResult(new PlaceholderInfo { VersionId   = versionId, VersionCuid = versionCuid, StorageName = storageName, StorageRef  = storageRef, StagingRef  = stagingRef });
+                return fb.SetStatus(true).SetResult(new PlaceholderInfo { VersionId   = versionId, VersionCuid = versionCuid, StorageName = storageName, StorageRef  = storagePath, StagingRef  = stagingRef });
 
             } catch (Exception ex) {
                 return fb.SetMessage(ex.Message);

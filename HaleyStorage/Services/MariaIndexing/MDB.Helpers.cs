@@ -33,13 +33,21 @@ namespace Haley.Utils {
         /// <summary>
         /// Ensures the workspace row exists in the per-module DB. If absent, inserts it
         /// (insert-ignore by workspace ID). Returns the workspace numeric ID.
-        /// Throws <see cref="ArgumentNullException"/> when the workspace is not in the cache.
+        /// Hydrates a persisted workspace on cache miss so runtime-created workspaces can be used
+        /// without restarting the storage process.
         /// </summary>
         async Task<(bool status, long id)> EnsureWorkSpace(IVaultReadRequest request) {
-            var wsCuidKey = request.Scope.Workspace.Cuid.ToString("N");
-            if (!_cache.ContainsKey(wsCuidKey)) throw new ArgumentNullException($@"Unable to find any workspace for {wsCuidKey}");
             var dbid = request.Scope.Module.Cuid.ToString("N");
-            var wspace = _cache[wsCuidKey];
+            if (!IsModuleAdapterRegistered(dbid))
+                throw new InvalidOperationException($@"Module adapter '{dbid}' is not active in this storage process.");
+
+            var wsCuidKey = request.Scope.Workspace.Cuid.ToString("N");
+            if (!_cache.TryGetValue(wsCuidKey, out var wspace)) {
+                var hydrated = await HydrateWorkspaceAsync(wsCuidKey).ConfigureAwait(false);
+                if (!hydrated || !_cache.TryGetValue(wsCuidKey, out wspace))
+                    throw new InvalidOperationException($@"Workspace '{wsCuidKey}' is not registered in the storage registry.");
+            }
+
             //Check if workspace exists in the database.
             var ws = await InsertAndFetchIDScalar(dbid, () => (INSTANCE.WORKSPACE.EXISTS, Consolidate((ID, wspace.Id))), () => (INSTANCE.WORKSPACE.INSERT, Consolidate((ID, wspace.Id))), readOnly:request.ReadOnlyMode, $@"Unable to insert the workspace  {wspace.Id}"); //Workspace registration can happen without transaction, as it might be needed for other items later.
             return (ws > 0, ws);
