@@ -3,14 +3,18 @@ using Haley.Enums;
 using Haley.Models;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using static Haley.Internal.IndexingConstant;
 using static Haley.Internal.IndexingQueries;
 
 namespace Haley.Utils {
     internal partial class MariaDBIndexing {
+        readonly ConcurrentDictionary<string, SemaphoreSlim> _statsLocks = new(StringComparer.OrdinalIgnoreCase);
+
         public async Task<IFeedback<VaultStatsSnapshot>> GetStats(IVaultReadRequest request, string extension = null) {
             var fb = new Feedback<VaultStatsSnapshot>();
             try {
@@ -69,21 +73,30 @@ namespace Haley.Utils {
                 if (batchSize < 1) batchSize = 100;
                 if (batchSize > 5000) batchSize = 5000;
 
-                var rows = await _agw.RowsAsync(moduleCuid, INSTANCE.STATS.GET_PENDING, default, (BATCH_SIZE, batchSize));
-                if (rows == null || rows.Count == 0)
-                    return fb.SetStatus(true).SetMessage("No stats events pending.").SetResult(0);
-
-                var handler = _agw.GetTransactionHandler(moduleCuid);
-                using (handler?.Begin()) {
-                    var load = new DbExecutionLoad(default, handler);
-                    foreach (var row in rows) {
-                        await ApplyStatDelta(moduleCuid, row, load);
-                        await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.MARK_PROCESSED, load, (ID, row.GetLong("id")), (MESSAGE, "processed"));
+                var statsLock = _statsLocks.GetOrAdd(moduleCuid, _ => new SemaphoreSlim(1, 1));
+                await statsLock.WaitAsync();
+                try {
+                    DbRows rows;
+                    var handler = _agw.GetTransactionHandler(moduleCuid);
+                    using (handler?.Begin()) {
+                        var load = new DbExecutionLoad(default, handler);
+                        rows = await _agw.RowsAsync(moduleCuid, INSTANCE.STATS.GET_PENDING, load, (BATCH_SIZE, batchSize));
+                        foreach (var row in rows ?? Enumerable.Empty<DbRow>()) {
+                            await ApplyStatDelta(moduleCuid, row, load);
+                            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.MARK_PROCESSED, load, (ID, row.GetLong("id")), (MESSAGE, "processed"));
+                        }
                     }
-                }
 
-                await RefreshCoreStats(moduleCuid);
-                return fb.SetStatus(true).SetMessage($"Processed {rows.Count} stats events.").SetResult(rows.Count);
+                    if (rows != null && rows.Count > 0)
+                        await RefreshCoreStats(moduleCuid);
+
+                    await TryCleanupProcessedStatsEvents(moduleCuid, batchSize);
+                    var count = rows?.Count ?? 0;
+                    var message = count == 0 ? "No stats events pending." : $"Processed {count} stats events.";
+                    return fb.SetStatus(true).SetMessage(message).SetResult(count);
+                } finally {
+                    statsLock.Release();
+                }
             } catch (Exception ex) {
                 _logger?.LogError(ex.Message + Environment.NewLine + ex.StackTrace);
                 return fb.SetMessage(ex.Message);
@@ -96,17 +109,23 @@ namespace Haley.Utils {
                 if (string.IsNullOrWhiteSpace(moduleCuid)) return fb.SetMessage("Module CUID is mandatory.");
                 if (!_agw.ContainsKey(moduleCuid)) return fb.SetMessage($"No adapter found for key {moduleCuid}.");
 
-                var handler = _agw.GetTransactionHandler(moduleCuid);
-                using (handler?.Begin()) {
-                    var load = new DbExecutionLoad(default, handler);
-                    await RebuildStatsInternal(moduleCuid, load);
-                }
+                var statsLock = _statsLocks.GetOrAdd(moduleCuid, _ => new SemaphoreSlim(1, 1));
+                await statsLock.WaitAsync();
+                try {
+                    var handler = _agw.GetTransactionHandler(moduleCuid);
+                    using (handler?.Begin()) {
+                        var load = new DbExecutionLoad(default, handler);
+                        await RebuildStatsInternal(moduleCuid, load);
+                    }
 
-                await RefreshCoreStats(moduleCuid);
-                var message = workspaceId.HasValue
-                    ? $"Stats rebuilt for module {moduleCuid}. Workspace-specific rebuild currently rebuilds the module for consistency."
-                    : $"Stats rebuilt for module {moduleCuid}.";
-                return fb.SetStatus(true).SetMessage(message);
+                    await RefreshCoreStats(moduleCuid);
+                    var message = workspaceId.HasValue
+                        ? $"Stats rebuilt for module {moduleCuid}. Workspace-specific rebuild currently rebuilds the module for consistency."
+                        : $"Stats rebuilt for module {moduleCuid}.";
+                    return fb.SetStatus(true).SetMessage(message);
+                } finally {
+                    statsLock.Release();
+                }
             } catch (Exception ex) {
                 _logger?.LogError(ex.Message + Environment.NewLine + ex.StackTrace);
                 return fb.SetMessage(ex.Message);
@@ -115,21 +134,34 @@ namespace Haley.Utils {
 
         async Task RebuildStatsInternal(string moduleCuid, DbExecutionLoad load) {
             await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.INSERT_RUN, load, (RUN_TYPE, "rebuild"), (STATUS, "started"), (MESSAGE, "exact rebuild started"));
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.CLEAR_TREE_EXT, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.CLEAR_NODE_EXT, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.CLEAR_TREE, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.CLEAR_NODE, load);
+            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.CLEAR_STATS, load);
             await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.CLEAR_DIR_PATH, load);
             await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.CLEAR_EVENTS, load);
             await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.REBUILD_DIR_PATH, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.REBUILD_NODE_STAT_WORKSPACE, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.REBUILD_NODE_STAT_DIRECTORY, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.REBUILD_NODE_EXT_STAT, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.REBUILD_TREE_STAT_WORKSPACE, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.REBUILD_TREE_STAT_DIRECTORY, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.REBUILD_TREE_EXT_STAT_WORKSPACE, load);
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.REBUILD_TREE_EXT_STAT_DIRECTORY, load);
+            await RebuildStatsSet(moduleCuid, INSTANCE.STATS.REBUILD_NODE_STATS, INSTANCE.STATS.INSERT_REBUILD_NODE_STATS, load);
+            await RebuildStatsSet(moduleCuid, INSTANCE.STATS.REBUILD_NODE_EXT_STATS, INSTANCE.STATS.INSERT_REBUILD_NODE_EXT_STATS, load);
+            await RebuildStatsSet(moduleCuid, INSTANCE.STATS.REBUILD_TREE_STATS, INSTANCE.STATS.INSERT_REBUILD_TREE_STATS, load);
+            await RebuildStatsSet(moduleCuid, INSTANCE.STATS.REBUILD_TREE_EXT_STATS, INSTANCE.STATS.INSERT_REBUILD_TREE_EXT_STATS, load);
             await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.INSERT_RUN, load, (RUN_TYPE, "rebuild"), (STATUS, "completed"), (MESSAGE, "exact rebuild completed"));
+        }
+
+        async Task RebuildStatsSet(string moduleCuid, string sourceQuery, string linkQuery, DbExecutionLoad load) {
+            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.DROP_REBUILD_TEMP, load);
+            try {
+                await _agw.ExecAsync(moduleCuid, sourceQuery, load);
+                await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.INSERT_REBUILD_STATS, load);
+                await _agw.ExecAsync(moduleCuid, linkQuery, load);
+            } finally {
+                await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.DROP_REBUILD_TEMP, load);
+            }
+        }
+
+        async Task TryCleanupProcessedStatsEvents(string moduleCuid, int batchSize) {
+            try {
+                await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.DELETE_PROCESSED, default, (BATCH_SIZE, batchSize));
+            } catch (Exception ex) {
+                _logger?.LogWarning(ex, "Unable to clean processed stats events for module {ModuleCuid}.", moduleCuid);
+            }
         }
 
         internal async Task QueueCompletedVersionStatsEvent(string moduleCuid, long versionId, long oldSize, int oldFlags, DbExecutionLoad load) {
@@ -455,7 +487,17 @@ namespace Haley.Utils {
         }
 
         async Task ApplyStatDelta(string moduleCuid, DbRow evt, DbExecutionLoad load) {
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.UPSERT_NODE_STAT_DELTA, load, BuildEventDeltaArgs(evt));
+            var nodeArgs = BuildStatOwnerArgs(evt);
+            var nodeStatId = await EnsureStatOwner(
+                moduleCuid,
+                INSTANCE.STATS.GET_NODE_STAT_ID,
+                INSTANCE.STATS.INSERT_NODE_STAT,
+                INSTANCE.STATS.INSERT_STAT,
+                INSTANCE.STATS.GET_LAST_STAT_ID,
+                INSTANCE.STATS.DELETE_STAT_IF_UNUSED,
+                load,
+                nodeArgs);
+            await ApplyStatDelta(moduleCuid, nodeStatId, evt, null, load);
 
             var treeTargets = await _agw.RowsAsync(
                 moduleCuid,
@@ -466,15 +508,97 @@ namespace Haley.Utils {
                 (NODE_ID, evt.GetLong("node_id")));
 
             foreach (var target in treeTargets) {
-                await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.UPSERT_TREE_STAT_DELTA, load, BuildEventDeltaArgs(evt, target));
+                var treeArgs = BuildStatOwnerArgs(evt, target);
+                var treeStatId = await EnsureStatOwner(
+                    moduleCuid,
+                    INSTANCE.STATS.GET_TREE_STAT_ID,
+                    INSTANCE.STATS.INSERT_TREE_STAT,
+                    INSTANCE.STATS.INSERT_STAT,
+                    INSTANCE.STATS.GET_LAST_STAT_ID,
+                    INSTANCE.STATS.DELETE_STAT_IF_UNUSED,
+                    load,
+                    treeArgs);
+                await ApplyStatDelta(moduleCuid, treeStatId, evt, target, load);
             }
 
             if (string.IsNullOrWhiteSpace(evt.GetString("ext"))) return;
 
-            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.UPSERT_NODE_EXT_STAT_DELTA, load, BuildEventDeltaArgs(evt));
+            var nodeExtArgs = BuildStatOwnerArgs(evt, includeExtension: true);
+            var nodeExtStatId = await EnsureStatOwner(
+                moduleCuid,
+                INSTANCE.STATS.GET_NODE_EXT_STAT_ID,
+                INSTANCE.STATS.INSERT_NODE_EXT_STAT,
+                INSTANCE.STATS.INSERT_STAT,
+                INSTANCE.STATS.GET_LAST_STAT_ID,
+                INSTANCE.STATS.DELETE_STAT_IF_UNUSED,
+                load,
+                nodeExtArgs);
+            await ApplyStatDelta(moduleCuid, nodeExtStatId, evt, null, load);
+
             foreach (var target in treeTargets) {
-                await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.UPSERT_TREE_EXT_STAT_DELTA, load, BuildEventDeltaArgs(evt, target));
+                var treeExtArgs = BuildStatOwnerArgs(evt, target, includeExtension: true);
+                var treeExtStatId = await EnsureStatOwner(
+                    moduleCuid,
+                    INSTANCE.STATS.GET_TREE_EXT_STAT_ID,
+                    INSTANCE.STATS.INSERT_TREE_EXT_STAT,
+                    INSTANCE.STATS.INSERT_STAT,
+                    INSTANCE.STATS.GET_LAST_STAT_ID,
+                    INSTANCE.STATS.DELETE_STAT_IF_UNUSED,
+                    load,
+                    treeExtArgs);
+                await ApplyStatDelta(moduleCuid, treeExtStatId, evt, target, load);
             }
+        }
+
+        async Task<long> EnsureStatOwner(
+            string adapter,
+            string getOwnerQuery,
+            string insertOwnerQuery,
+            string insertStatQuery,
+            string getLastStatIdQuery,
+            string cleanupStatQuery,
+            DbExecutionLoad load,
+            DbArg[] ownerArgs) {
+            var current = await _agw.ScalarAsync<long?>(adapter, getOwnerQuery, load, ownerArgs);
+            if (current.HasValue && current.Value > 0) return current.Value;
+
+            await _agw.ExecAsync(adapter, insertStatQuery, load);
+            var statId = await _agw.ScalarAsync<long?>(adapter, getLastStatIdQuery, load);
+            if (!statId.HasValue || statId.Value < 1)
+                throw new InvalidOperationException("Unable to create the statistics payload.");
+
+            var insertArgs = ownerArgs.Concat(new DbArg[] { (STAT_ID, statId.Value) }).ToArray();
+            try {
+                await _agw.ExecAsync(adapter, insertOwnerQuery, load, insertArgs);
+                return statId.Value;
+            } catch {
+                try {
+                    await _agw.ExecAsync(adapter, cleanupStatQuery, load, (STAT_ID, statId.Value));
+                    current = await _agw.ScalarAsync<long?>(adapter, getOwnerQuery, load, ownerArgs);
+                    if (current.HasValue && current.Value > 0) return current.Value;
+                } catch {
+                    // Preserve the original relation-insert failure.
+                }
+                throw;
+            }
+        }
+
+        async Task ApplyStatDelta(string moduleCuid, long statId, DbRow evt, DbRow target, DbExecutionLoad load) {
+            var args = BuildEventDeltaArgs(evt, target)
+                .Concat(new DbArg[] { (STAT_ID, statId) })
+                .ToArray();
+            await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.APPLY_STAT_DELTA, load, args);
+        }
+
+        DbArg[] BuildStatOwnerArgs(DbRow evt, DbRow target = null, bool includeExtension = false) {
+            var args = new List<DbArg> {
+                (NODE_TYPE, target?.GetInt("node_type") ?? evt.GetInt("node_type")),
+                (NODE_ID, target?.GetLong("node_id") ?? evt.GetLong("node_id")),
+                (WORKSPACE_ID, target?.GetLong("workspace") ?? evt.GetLong("workspace"))
+            };
+            if (includeExtension)
+                args.Add((EXT_NAME, evt.GetString("ext")));
+            return args.ToArray();
         }
 
         DbArg[] BuildEventDeltaArgs(DbRow evt, DbRow target = null) {
@@ -513,31 +637,71 @@ namespace Haley.Utils {
             var clientId = module.GetLong("client_id");
             var workspaceRows = await _agw.RowsAsync(moduleCuid, INSTANCE.STATS.GET_WORKSPACE_TREE_STATS);
 
-            foreach (var row in workspaceRows ?? Enumerable.Empty<DbRow>()) {
-                var counters = MapCounters(row);
-                await _agw.ExecAsync(
-                    _key,
-                    STATS_CORE.UPSERT_WORKSPACE,
-                    default,
-                    (WORKSPACE_ID, row.GetLong("node_id")),
-                    (ID, moduleId),
-                    (PARENT, clientId),
-                    (ACTIVE_FOLDERS_DELTA, counters.ActiveFolders),
-                    (DELETED_FOLDERS_DELTA, counters.DeletedFolders),
-                    (ACTIVE_DOCS_DELTA, counters.ActiveDocuments),
-                    (DELETED_DOCS_DELTA, counters.DeletedDocuments),
-                    (ACTIVE_VERSIONS_DELTA, counters.ActiveVersions),
-                    (DELETED_VERSIONS_DELTA, counters.DeletedVersions),
-                    (ACTIVE_THUMBS_DELTA, counters.ActiveThumbnails),
-                    (DELETED_THUMBS_DELTA, counters.DeletedThumbnails),
-                    (ACTIVE_BYTES_DELTA, counters.ActiveBytes),
-                    (DELETED_BYTES_DELTA, counters.DeletedBytes),
-                    (ARCHIVED_BYTES_DELTA, counters.ArchivedBytes),
-                    (PURGED_BYTES_DELTA, counters.PurgedBytes));
-            }
+            var handler = _agw.GetTransactionHandler(_key);
+            using (handler?.Begin()) {
+                var load = new DbExecutionLoad(default, handler);
+                foreach (var row in workspaceRows ?? Enumerable.Empty<DbRow>()) {
+                    var ownerArgs = new DbArg[] {
+                        (WORKSPACE_ID, row.GetLong("node_id")),
+                        (ID, moduleId),
+                        (PARENT, clientId)
+                    };
+                    var statId = await EnsureStatOwner(
+                        _key,
+                        STATS_CORE.GET_WORKSPACE_STAT_ID,
+                        STATS_CORE.INSERT_WORKSPACE_STAT,
+                        STATS_CORE.INSERT_STAT,
+                        STATS_CORE.GET_LAST_STAT_ID,
+                        STATS_CORE.DELETE_STAT_IF_UNUSED,
+                        load,
+                        ownerArgs);
+                    await OverwriteStat(_key, statId, MapCounters(row), load);
+                }
 
-            await _agw.ExecAsync(_key, STATS_CORE.REBUILD_MODULE, default, (ID, moduleId), (PARENT, clientId));
-            await _agw.ExecAsync(_key, STATS_CORE.REBUILD_CLIENT, default, (PARENT, clientId));
+                var moduleStatId = await EnsureStatOwner(
+                    _key,
+                    STATS_CORE.GET_MODULE_STAT_ID,
+                    STATS_CORE.INSERT_MODULE_STAT,
+                    STATS_CORE.INSERT_STAT,
+                    STATS_CORE.GET_LAST_STAT_ID,
+                    STATS_CORE.DELETE_STAT_IF_UNUSED,
+                    load,
+                    new DbArg[] { (ID, moduleId), (PARENT, clientId) });
+                var moduleTotals = await _agw.RowAsync(_key, STATS_CORE.GET_MODULE_TOTALS, load, (ID, moduleId));
+                await OverwriteStat(_key, moduleStatId, MapCounters(moduleTotals), load);
+
+                var clientStatId = await EnsureStatOwner(
+                    _key,
+                    STATS_CORE.GET_CLIENT_STAT_ID,
+                    STATS_CORE.INSERT_CLIENT_STAT,
+                    STATS_CORE.INSERT_STAT,
+                    STATS_CORE.GET_LAST_STAT_ID,
+                    STATS_CORE.DELETE_STAT_IF_UNUSED,
+                    load,
+                    new DbArg[] { (PARENT, clientId) });
+                var clientTotals = await _agw.RowAsync(_key, STATS_CORE.GET_CLIENT_TOTALS, load, (PARENT, clientId));
+                await OverwriteStat(_key, clientStatId, MapCounters(clientTotals), load);
+            }
+        }
+
+        async Task OverwriteStat(string adapter, long statId, VaultStatsCounters counters, DbExecutionLoad load) {
+            await _agw.ExecAsync(
+                adapter,
+                STATS_CORE.OVERWRITE_STAT,
+                load,
+                (STAT_ID, statId),
+                (ACTIVE_FOLDERS_DELTA, counters.ActiveFolders),
+                (DELETED_FOLDERS_DELTA, counters.DeletedFolders),
+                (ACTIVE_DOCS_DELTA, counters.ActiveDocuments),
+                (DELETED_DOCS_DELTA, counters.DeletedDocuments),
+                (ACTIVE_VERSIONS_DELTA, counters.ActiveVersions),
+                (DELETED_VERSIONS_DELTA, counters.DeletedVersions),
+                (ACTIVE_THUMBS_DELTA, counters.ActiveThumbnails),
+                (DELETED_THUMBS_DELTA, counters.DeletedThumbnails),
+                (ACTIVE_BYTES_DELTA, counters.ActiveBytes),
+                (DELETED_BYTES_DELTA, counters.DeletedBytes),
+                (ARCHIVED_BYTES_DELTA, counters.ArchivedBytes),
+                (PURGED_BYTES_DELTA, counters.PurgedBytes));
         }
 
         static VaultStatsCounters ToDeleteDelta(DbRow row) {

@@ -85,6 +85,7 @@ namespace Haley.Internal {
         public const string EVENT_TYPE = $@"@{nameof(EVENT_TYPE)}";
         public const string NODE_TYPE = $@"@{nameof(NODE_TYPE)}";
         public const string NODE_ID = $@"@{nameof(NODE_ID)}";
+        public const string STAT_ID = $@"@{nameof(STAT_ID)}";
         public const string WORKSPACE_ID = $@"@{nameof(WORKSPACE_ID)}";
         public const string DOCUMENT_ID = $@"@{nameof(DOCUMENT_ID)}";
         public const string VERSION_ID = $@"@{nameof(VERSION_ID)}";

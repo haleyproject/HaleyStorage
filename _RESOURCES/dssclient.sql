@@ -198,11 +198,9 @@ CREATE TABLE IF NOT EXISTS `dir_path` (
 
 -- Data exporting was unselected.
 
--- Dumping structure for table dss_client.node_stat
-CREATE TABLE IF NOT EXISTS `node_stat` (
-  `node_type` tinyint(4) NOT NULL COMMENT '1=workspace, 2=directory.',
-  `node_id` bigint(20) NOT NULL COMMENT 'workspace.id when node_type=1; directory.id when node_type=2.',
-  `workspace` bigint(20) NOT NULL COMMENT 'Owning workspace id for quick filtering.',
+-- Dumping structure for table dss_client.stat
+CREATE TABLE IF NOT EXISTS `stat` (
+  `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'Surrogate key for one reusable statistics payload.',
   `active_folders` bigint(20) NOT NULL DEFAULT 0,
   `deleted_folders` bigint(20) NOT NULL DEFAULT 0,
   `active_docs` bigint(20) NOT NULL DEFAULT 0,
@@ -216,9 +214,22 @@ CREATE TABLE IF NOT EXISTS `node_stat` (
   `archived_bytes` bigint(20) NOT NULL DEFAULT 0,
   `purged_bytes` bigint(20) NOT NULL DEFAULT 0,
   `modified` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB AUTO_INCREMENT=1988 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Reusable cached statistics payload. Ownership is held by one stat connection row.';
+
+-- Data exporting was unselected.
+
+-- Dumping structure for table dss_client.node_stat
+CREATE TABLE IF NOT EXISTS `node_stat` (
+  `node_type` tinyint(4) NOT NULL COMMENT '1=workspace, 2=directory.',
+  `node_id` bigint(20) NOT NULL COMMENT 'workspace.id when node_type=1; directory.id when node_type=2.',
+  `workspace` bigint(20) NOT NULL COMMENT 'Owning workspace id for quick filtering.',
+  `stat` bigint(20) NOT NULL COMMENT 'FK to stat.id containing the cached counters.',
   PRIMARY KEY (`node_type`,`node_id`),
-  KEY `idx_node_stat_workspace` (`workspace`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Direct cached counts for one workspace or directory node.';
+  UNIQUE KEY `unq_node_stat_stat` (`stat`),
+  KEY `idx_node_stat_workspace` (`workspace`),
+  CONSTRAINT `fk_node_stat_stat` FOREIGN KEY (`stat`) REFERENCES `stat` (`id`) ON DELETE CASCADE ON UPDATE NO ACTION
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Connects a direct workspace or directory node to its statistics payload.';
 
 -- Data exporting was unselected.
 
@@ -227,22 +238,12 @@ CREATE TABLE IF NOT EXISTS `tree_stat` (
   `node_type` tinyint(4) NOT NULL COMMENT '1=workspace, 2=directory.',
   `node_id` bigint(20) NOT NULL COMMENT 'workspace.id when node_type=1; directory.id when node_type=2.',
   `workspace` bigint(20) NOT NULL COMMENT 'Owning workspace id for quick filtering.',
-  `active_folders` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_folders` bigint(20) NOT NULL DEFAULT 0,
-  `active_docs` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_docs` bigint(20) NOT NULL DEFAULT 0,
-  `active_versions` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_versions` bigint(20) NOT NULL DEFAULT 0,
-  `active_thumbs` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_thumbs` bigint(20) NOT NULL DEFAULT 0,
-  `active_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `archived_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `purged_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `modified` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `stat` bigint(20) NOT NULL COMMENT 'FK to stat.id containing the cached counters.',
   PRIMARY KEY (`node_type`,`node_id`),
-  KEY `idx_tree_stat_workspace` (`workspace`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Recursive cached counts for one workspace or directory node.';
+  UNIQUE KEY `unq_tree_stat_stat` (`stat`),
+  KEY `idx_tree_stat_workspace` (`workspace`),
+  CONSTRAINT `fk_tree_stat_stat` FOREIGN KEY (`stat`) REFERENCES `stat` (`id`) ON DELETE CASCADE ON UPDATE NO ACTION
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Connects a recursive workspace or directory tree to its statistics payload.';
 
 -- Data exporting was unselected.
 
@@ -252,20 +253,12 @@ CREATE TABLE IF NOT EXISTS `node_ext_stat` (
   `node_id` bigint(20) NOT NULL,
   `workspace` bigint(20) NOT NULL,
   `ext` varchar(100) NOT NULL COMMENT 'Normalized extension from storage/name metadata, including dot when present.',
-  `active_docs` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_docs` bigint(20) NOT NULL DEFAULT 0,
-  `active_versions` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_versions` bigint(20) NOT NULL DEFAULT 0,
-  `active_thumbs` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_thumbs` bigint(20) NOT NULL DEFAULT 0,
-  `active_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `archived_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `purged_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `modified` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `stat` bigint(20) NOT NULL COMMENT 'FK to stat.id containing the cached counters.',
   PRIMARY KEY (`node_type`,`node_id`,`ext`),
-  KEY `idx_node_ext_stat_workspace_ext` (`workspace`,`ext`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Direct cached extension counts for one workspace or directory node.';
+  UNIQUE KEY `unq_node_ext_stat_stat` (`stat`),
+  KEY `idx_node_ext_stat_workspace_ext` (`workspace`,`ext`),
+  CONSTRAINT `fk_node_ext_stat_stat` FOREIGN KEY (`stat`) REFERENCES `stat` (`id`) ON DELETE CASCADE ON UPDATE NO ACTION
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Connects a direct node extension to its statistics payload.';
 
 -- Data exporting was unselected.
 
@@ -275,20 +268,12 @@ CREATE TABLE IF NOT EXISTS `tree_ext_stat` (
   `node_id` bigint(20) NOT NULL,
   `workspace` bigint(20) NOT NULL,
   `ext` varchar(100) NOT NULL COMMENT 'Normalized extension from storage/name metadata, including dot when present.',
-  `active_docs` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_docs` bigint(20) NOT NULL DEFAULT 0,
-  `active_versions` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_versions` bigint(20) NOT NULL DEFAULT 0,
-  `active_thumbs` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_thumbs` bigint(20) NOT NULL DEFAULT 0,
-  `active_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `deleted_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `archived_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `purged_bytes` bigint(20) NOT NULL DEFAULT 0,
-  `modified` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  `stat` bigint(20) NOT NULL COMMENT 'FK to stat.id containing the cached counters.',
   PRIMARY KEY (`node_type`,`node_id`,`ext`),
-  KEY `idx_tree_ext_stat_workspace_ext` (`workspace`,`ext`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Recursive cached extension counts for one workspace or directory node.';
+  UNIQUE KEY `unq_tree_ext_stat_stat` (`stat`),
+  KEY `idx_tree_ext_stat_workspace_ext` (`workspace`,`ext`),
+  CONSTRAINT `fk_tree_ext_stat_stat` FOREIGN KEY (`stat`) REFERENCES `stat` (`id`) ON DELETE CASCADE ON UPDATE NO ACTION
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Connects a recursive tree extension to its statistics payload.';
 
 -- Data exporting was unselected.
 
