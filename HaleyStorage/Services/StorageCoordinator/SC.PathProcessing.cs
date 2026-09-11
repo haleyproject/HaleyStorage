@@ -575,6 +575,12 @@ namespace Haley.Services {
                     && now - refreshed < WorkspaceRegistryRefreshInterval)
                     return;
 
+                var moduleCuid = input.Scope.Module?.Cuid.ToString("N");
+                if (!string.IsNullOrWhiteSpace(moduleCuid)
+                    && Indexer.IsModuleAdapterRegistered(moduleCuid)
+                    && !Indexer.TryGetComponentInfo<VaultModule>(moduleCuid, out _))
+                    await Indexer.HydrateModuleAsync(moduleCuid);
+
                 if (await Indexer.HydrateWorkspaceAsync(workspaceCuid, forceRefresh: true)) {
                     _pathCache.TryRemove(workspaceCuid, out _);
                     _workspaceRegistryRefresh.AddOrUpdate(workspaceCuid, now, (_, _) => now);
