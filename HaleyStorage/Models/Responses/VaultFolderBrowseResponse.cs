@@ -16,6 +16,8 @@ namespace Haley.Models {
         public bool IncludeAll { get; set; }
         public int Page { get; set; }
         public int PageSize { get; set; }
+        public bool TotalsIncluded { get; set; } = true;
+        public bool HasNext { get; set; }
         public long TotalItems { get; set; }
         public long TotalFolders { get; set; }
         public long TotalFiles { get; set; }

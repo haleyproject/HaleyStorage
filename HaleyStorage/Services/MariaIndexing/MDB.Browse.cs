@@ -13,7 +13,7 @@ namespace Haley.Utils {
     /// Partial class — DB-backed browse/explore APIs for folders and file history.
     /// </summary>
     internal partial class MariaDBIndexing {
-        public async Task<IFeedback<VaultFolderBrowseResponse>> BrowseFolder(IVaultReadRequest request, int page = 1, int pageSize = 50, bool includeAll = false, VaultFolderSortMode sort = VaultFolderSortMode.Id, VaultSortDirection direction = VaultSortDirection.Asc, VaultFolderItemKind kind = VaultFolderItemKind.Both) {
+        public async Task<IFeedback<VaultFolderBrowseResponse>> BrowseFolder(IVaultReadRequest request, int page = 1, int pageSize = 50, bool includeAll = false, VaultFolderSortMode sort = VaultFolderSortMode.Id, VaultSortDirection direction = VaultSortDirection.Asc, VaultFolderItemKind kind = VaultFolderItemKind.Both, bool includeTotals = true) {
             var fb = new Feedback<VaultFolderBrowseResponse>();
             try {
                 if (request == null) return fb.SetMessage("Input request cannot be empty.");
@@ -35,20 +35,24 @@ namespace Haley.Utils {
                 var folderInfo = await ResolveFolderInfo(moduleCuid, request, wsId, includeAll);
                 if (!folderInfo.status) return fb.SetMessage(folderInfo.message);
 
-                var totalFolders = kind == VaultFolderItemKind.Files
+                var totalFolders = !includeTotals || kind == VaultFolderItemKind.Files
                     ? 0
                     : await _agw.ScalarAsync<long?>(moduleCuid, includeAll ? INSTANCE.DIRECTORY.COUNT_CHILDREN_ALL : INSTANCE.DIRECTORY.COUNT_CHILDREN, default, (WSPACE, wsId), (PARENT, folderInfo.id)) ?? 0;
-                var totalFiles = kind == VaultFolderItemKind.Folders
+                var totalFiles = !includeTotals || kind == VaultFolderItemKind.Folders
                     ? 0
                     : await _agw.ScalarAsync<long?>(moduleCuid, includeAll ? INSTANCE.DOCUMENT.COUNT_BY_DIRECTORY_ALL : INSTANCE.DOCUMENT.COUNT_BY_DIRECTORY, default, (WSPACE, wsId), (PARENT, folderInfo.id)) ?? 0;
                 var offset = (page - 1) * pageSize;
+                var fetchSize = includeTotals ? pageSize : pageSize + 1;
 
                 var query = ApplyFolderListingOptions(includeAll ? INSTANCE.DIRECTORY.BROWSE_ITEMS_ALL : INSTANCE.DIRECTORY.BROWSE_ITEMS, "browse_items", sort, direction, kind);
-                var rows = await _agw.RowsAsync(moduleCuid, query, default, (WSPACE, wsId), (PARENT, folderInfo.id), (LIMIT_ROWS, pageSize), (OFFSET_ROWS, offset));
+                var rows = await _agw.RowsAsync(moduleCuid, query, default, (WSPACE, wsId), (PARENT, folderInfo.id), (LIMIT_ROWS, fetchSize), (OFFSET_ROWS, offset));
+                var hasNext = includeTotals
+                    ? offset + rows.Count < totalFolders + totalFiles
+                    : rows.Count > pageSize;
 
-                var response = new VaultFolderBrowseResponse { WorkspaceId = wsId, WorkspaceCuid = request.Scope.Workspace.Cuid.ToString("N"), IsRoot = folderInfo.isRoot, CurrentFolderId = folderInfo.id, CurrentFolderCuid = folderInfo.cuid, CurrentFolderName = folderInfo.displayName, CurrentFolderParentId = folderInfo.parentId, IncludeAll = includeAll, Page = page, PageSize = pageSize, TotalFolders = totalFolders, TotalFiles = totalFiles, TotalItems = totalFolders + totalFiles };
+                var response = new VaultFolderBrowseResponse { WorkspaceId = wsId, WorkspaceCuid = request.Scope.Workspace.Cuid.ToString("N"), IsRoot = folderInfo.isRoot, CurrentFolderId = folderInfo.id, CurrentFolderCuid = folderInfo.cuid, CurrentFolderName = folderInfo.displayName, CurrentFolderParentId = folderInfo.parentId, IncludeAll = includeAll, Page = page, PageSize = pageSize, TotalsIncluded = includeTotals, HasNext = hasNext, TotalFolders = totalFolders, TotalFiles = totalFiles, TotalItems = totalFolders + totalFiles };
 
-                foreach (var row in rows) {
+                foreach (var row in rows.Take(pageSize)) {
                     response.Items.Add(MapBrowseItem(row));
                 }
 
