@@ -173,6 +173,21 @@
 			</fk>
 			<options><![CDATA[ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci]]></options>
 		</table>
+		<table name="rule_gate" spec="" >
+			<column name="rule_id" type="BIGINT" length="20" mandatory="y" />
+			<column name="min_size_mb" type="BIGINT" length="20" unsigned="y" />
+			<column name="max_size_mb" type="BIGINT" length="20" unsigned="y" />
+			<column name="min_pressure" type="TINYINT" length="3" unsigned="y" >
+				<comment><![CDATA[1=Busy, 2=Critical]]></comment>
+			</column>
+			<index name="pk_rule_gate" unique="PRIMARY_KEY" >
+				<column name="rule_id" />
+			</index>
+			<fk name="fk_rule_gate_info" to_schema="dss_admin" to_table="rule_info" delete_action="cascade" >
+				<fk_column name="rule_id" pk="id" />
+			</fk>
+			<options><![CDATA[ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci]]></options>
+		</table>
 		<table name="rule_group" spec="" >
 			<column name="id" type="BIGINT" length="20" mandatory="y" >
 				<identity><![CDATA[AUTO_INCREMENT]]></identity>
@@ -265,6 +280,19 @@
 			</index>
 			<fk name="fk_rule_limit_info" to_schema="dss_admin" to_table="rule_info" delete_action="cascade" >
 				<fk_column name="rule_id" pk="id" />
+			</fk>
+			<options><![CDATA[ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci]]></options>
+		</table>
+		<table name="shr_brand" spec="" >
+			<column name="shr_id" type="BIGINT" length="20" mandatory="y" />
+			<column name="logo_url" type="VARCHAR" length="2048" />
+			<column name="title" type="VARCHAR" length="160" />
+			<column name="message" type="VARCHAR" length="1000" />
+			<index name="pk_shr_brand" unique="PRIMARY_KEY" >
+				<column name="shr_id" />
+			</index>
+			<fk name="fk_shr_brand_info" to_schema="dss_admin" to_table="shr_info" delete_action="cascade" >
+				<fk_column name="shr_id" pk="id" />
 			</fk>
 			<options><![CDATA[ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci]]></options>
 		</table>
@@ -1330,8 +1358,12 @@ interesting idea is one file can have multiple thumbnails and it can be used sa 
 	<schema name="dss_core" >
 		<table name="cli_stat" spec="" >
 			<comment><![CDATA[Connects one client to its reusable statistics payload.]]></comment>
-			<column name="stat" type="BIGINT" length="20" mandatory="y" />
-			<column name="client" type="INT" length="11" mandatory="y" />
+			<column name="stat" type="BIGINT" length="20" mandatory="y" >
+				<comment><![CDATA[FK to stat.id containing the cached counters.]]></comment>
+			</column>
+			<column name="client" type="INT" length="11" mandatory="y" >
+				<comment><![CDATA[FK to client.id.]]></comment>
+			</column>
 			<index name="pk_cli_stat" unique="PRIMARY_KEY" >
 				<column name="client" />
 			</index>
@@ -1412,9 +1444,15 @@ Example: when "hr_portal" is registered, a random 512-char signing key and encry
 		</table>
 		<table name="mod_stat" spec="" >
 			<comment><![CDATA[Connects one module to its reusable statistics payload.]]></comment>
-			<column name="stat" type="BIGINT" length="20" mandatory="y" />
-			<column name="module" type="INT" length="11" mandatory="y" />
-			<column name="client" type="INT" length="11" mandatory="y" />
+			<column name="stat" type="BIGINT" length="20" mandatory="y" >
+				<comment><![CDATA[FK to stat.id containing the cached counters.]]></comment>
+			</column>
+			<column name="module" type="INT" length="11" mandatory="y" >
+				<comment><![CDATA[FK to module.id.]]></comment>
+			</column>
+			<column name="client" type="INT" length="11" mandatory="y" >
+				<comment><![CDATA[Parent client id for quick filtering.]]></comment>
+			</column>
 			<index name="pk_mod_stat" unique="PRIMARY_KEY" >
 				<column name="module" />
 			</index>
@@ -1644,6 +1682,7 @@ One provider name can serve many workspaces and modules via different profile_in
 			</column>
 			<column name="id" type="BIGINT" length="20" mandatory="y" >
 				<identity><![CDATA[AUTO_INCREMENT]]></identity>
+				<comment><![CDATA[Surrogate key for one reusable statistics payload.]]></comment>
 			</column>
 			<column name="deleted_versions" type="BIGINT" length="20" mandatory="y" >
 				<defo><![CDATA[0]]></defo>
@@ -1768,10 +1807,18 @@ The storagename_mode and storagename_parse settings are fixed at registration ti
 		</table>
 		<table name="ws_stat" spec="" >
 			<comment><![CDATA[Connects one workspace to its reusable statistics payload.]]></comment>
-			<column name="stat" type="BIGINT" length="20" mandatory="y" />
-			<column name="workspace" type="INT" length="11" mandatory="y" />
-			<column name="module" type="INT" length="11" mandatory="y" />
-			<column name="client" type="INT" length="11" mandatory="y" />
+			<column name="stat" type="BIGINT" length="20" mandatory="y" >
+				<comment><![CDATA[FK to stat.id containing the cached counters.]]></comment>
+			</column>
+			<column name="workspace" type="INT" length="11" mandatory="y" >
+				<comment><![CDATA[FK to workspace.id.]]></comment>
+			</column>
+			<column name="module" type="INT" length="11" mandatory="y" >
+				<comment><![CDATA[Parent module id for quick filtering.]]></comment>
+			</column>
+			<column name="client" type="INT" length="11" mandatory="y" >
+				<comment><![CDATA[Parent client id for quick filtering.]]></comment>
+			</column>
 			<index name="pk_ws_stat" unique="PRIMARY_KEY" >
 				<column name="workspace" />
 			</index>
@@ -2103,21 +2150,23 @@ ALTER TABLE dss_core.directory ADD CONSTRAINT fk_direcory_client FOREIGN KEY ( p
 			</browser>
 		</diagram>
 		<diagram name="mss-admin" id="4005820e-6e8b-41e4-8a40-fad60b92d53d" joined_routing="y" show_relation="cascade" >
-			<entity schema="dss_admin" name="col_folder" color="000080" x="513" y="627" />
-			<entity schema="dss_admin" name="col_info" color="000080" x="931" y="608" />
-			<entity schema="dss_admin" name="col_item" color="000080" x="741" y="608" />
-			<entity schema="dss_admin" name="col_ref" color="000080" x="760" y="779" />
-			<entity schema="dss_admin" name="col_scope" color="000080" x="513" y="798" />
-			<entity schema="dss_admin" name="edge_apply" color="3986C1" x="513" y="988" />
-			<entity schema="dss_admin" name="rule_filter" color="FFFF00" x="304" y="969" />
-			<entity schema="dss_admin" name="rule_group" color="FFFF00" x="323" y="741" />
-			<entity schema="dss_admin" name="rule_info" color="FFFF00" x="57" y="874" />
-			<entity schema="dss_admin" name="rule_limit" color="FFFF00" x="57" y="722" />
-			<entity schema="dss_admin" name="shr_info" color="00FF00" x="741" y="228" />
+			<entity schema="dss_admin" name="col_folder" color="000080" x="513" y="646" />
+			<entity schema="dss_admin" name="col_info" color="000080" x="931" y="627" />
+			<entity schema="dss_admin" name="col_item" color="000080" x="741" y="627" />
+			<entity schema="dss_admin" name="col_ref" color="000080" x="760" y="798" />
+			<entity schema="dss_admin" name="col_scope" color="000080" x="513" y="817" />
+			<entity schema="dss_admin" name="edge_apply" color="3986C1" x="513" y="1007" />
+			<entity schema="dss_admin" name="rule_filter" color="FFFF00" x="304" y="874" />
+			<entity schema="dss_admin" name="rule_gate" color="FFFF00" x="57" y="798" />
+			<entity schema="dss_admin" name="rule_group" color="FFFF00" x="304" y="1102" />
+			<entity schema="dss_admin" name="rule_info" color="FFFF00" x="57" y="969" />
+			<entity schema="dss_admin" name="rule_limit" color="FFFF00" x="285" y="741" />
+			<entity schema="dss_admin" name="shr_brand" color="00FF00" x="931" y="95" />
+			<entity schema="dss_admin" name="shr_info" color="00FF00" x="741" y="247" />
 			<entity schema="dss_admin" name="shr_sec" color="00FF00" x="760" y="95" />
-			<entity schema="dss_admin" name="shr_stat" color="00FF00" x="513" y="304" />
-			<entity schema="dss_admin" name="shr_target" color="00FF00" x="931" y="228" />
-			<entity schema="dss_admin" name="shr_text" color="00FF00" x="513" y="152" />
+			<entity schema="dss_admin" name="shr_stat" color="00FF00" x="513" y="323" />
+			<entity schema="dss_admin" name="shr_target" color="00FF00" x="931" y="247" />
+			<entity schema="dss_admin" name="shr_text" color="00FF00" x="513" y="171" />
 			<entity schema="dss_admin" name="tx_info" color="FF0000" x="57" y="114" />
 			<entity schema="dss_admin" name="tx_prog" color="FF0000" x="57" y="399" />
 			<entity schema="dss_admin" name="tx_ref" color="FF0000" x="304" y="266" />
@@ -2132,11 +2181,13 @@ ALTER TABLE dss_core.directory ADD CONSTRAINT fk_direcory_client FOREIGN KEY ( p
 			</group>
 			<group name="Bandwith Rules" color="FFFF00" >
 				<entity schema="dss_admin" name="rule_filter" />
+				<entity schema="dss_admin" name="rule_gate" />
 				<entity schema="dss_admin" name="rule_group" />
 				<entity schema="dss_admin" name="rule_info" />
 				<entity schema="dss_admin" name="rule_limit" />
 			</group>
 			<group name="Direct Shares" color="00FF00" >
+				<entity schema="dss_admin" name="shr_brand" />
 				<entity schema="dss_admin" name="shr_info" />
 				<entity schema="dss_admin" name="shr_sec" />
 				<entity schema="dss_admin" name="shr_stat" />
