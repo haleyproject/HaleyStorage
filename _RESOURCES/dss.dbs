@@ -618,6 +618,10 @@
 			<index name="pk_chunk_info" unique="PRIMARY_KEY" >
 				<column name="id" />
 			</index>
+			<index name="idx_chunk_info_completion" unique="NORMAL" >
+				<column name="is_completed" />
+				<column name="id" />
+			</index>
 			<constraint name="cns_chunk_info" >
 				<string><![CDATA[`parts` >= 1]]></string>
 			</constraint>
