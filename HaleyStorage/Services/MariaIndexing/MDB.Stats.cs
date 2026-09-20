@@ -209,6 +209,7 @@ namespace Haley.Utils {
             var nodeId = parentId > 0 ? parentId : workspaceId;
 
             await _agw.ExecAsync(moduleCuid, INSTANCE.STATS.INSERT_DIR_PATH_FOR_DIRECTORY, load, (ID, folderId));
+            if (await IsHiddenDirectory(moduleCuid, folderId, load)) return;
             await QueueStatsEventAsync(
                 moduleCuid,
                 VaultStatsEventType.FolderCreate,
@@ -397,6 +398,7 @@ namespace Haley.Utils {
         }
 
         async Task QueueFolderLifecycleEvent(string moduleCuid, VaultStatsEventType eventType, DbRow row, long activeDelta, long deletedDelta, DbExecutionLoad load) {
+            if (await IsHiddenDirectory(moduleCuid, row.GetLong("id"), load)) return;
             var workspaceId = row.GetLong("workspace");
             var parentId = row.GetLong("parent");
             var nodeType = parentId > 0 ? (int)VaultStatsNodeType.Directory : (int)VaultStatsNodeType.Workspace;
@@ -458,7 +460,14 @@ namespace Haley.Utils {
             string ext,
             VaultStatsCounters counters,
             DbExecutionLoad load) {
-            if (counters == null || IsZero(counters)) return;
+            if (counters == null) return;
+            if (nodeType == (int)VaultStatsNodeType.Directory && await IsHiddenDirectory(moduleCuid, nodeId, load)) {
+                counters.ActiveFolders = counters.DeletedFolders = 0;
+                counters.ActiveDocuments = counters.DeletedDocuments = 0;
+                counters.ActiveVersions = counters.DeletedVersions = 0;
+                counters.ActiveThumbnails = counters.DeletedThumbnails = 0;
+            }
+            if (IsZero(counters)) return;
 
             await _agw.ExecAsync(
                 moduleCuid,

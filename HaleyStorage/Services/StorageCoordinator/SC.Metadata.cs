@@ -18,6 +18,7 @@ namespace Haley.Services {
             try {
                 if (request == null) return fb.SetMessage("Request cannot be null.");
                 if (string.IsNullOrWhiteSpace(versionCuid)) return fb.SetMessage("Version CUID (uid) is required.");
+                await Indexer.DemandDirectoryAccess(request, versionCuid: versionCuid);
                 var moduleCuid = StorageUtils.GenerateCuid(request, VaultObjectType.Module);
                 return await Indexer.GetVersionMetadata(moduleCuid, versionCuid);
             } catch (Exception ex) {
@@ -55,6 +56,7 @@ namespace Haley.Services {
             try {
                 if (request == null) return fb.SetMessage("Request cannot be null.");
                 if (string.IsNullOrWhiteSpace(documentCuid)) return fb.SetMessage("Document CUID (ruid) is required.");
+                await Indexer.DemandDirectoryAccess(request, documentCuid: documentCuid);
                 var moduleCuid = StorageUtils.GenerateCuid(request, VaultObjectType.Module);
                 return await Indexer.GetDocumentMetadata(moduleCuid, documentCuid);
             } catch (Exception ex) {

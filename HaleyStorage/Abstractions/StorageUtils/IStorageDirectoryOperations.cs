@@ -5,6 +5,13 @@ using System.Threading.Tasks;
 
 namespace Haley.Abstractions {
     public interface IStorageDirectoryOperations {
+        Task<IFeedback<VaultDirectoryInfo>> GetDirectoryMetadata(IVaultReadRequest request);
+        Task<IFeedback> SetDirectoryMetadata(IVaultReadRequest request, string metadata);
+        Task<IFeedback> RenameDirectory(IVaultReadRequest request, string name);
+        Task<IVaultResponse> UploadDirectoryThumbnail(IVaultReadRequest request, System.IO.Stream stream, string fileName);
+        Task<IVaultStreamResponse> DownloadDirectoryThumbnail(IVaultReadRequest request);
+        Task<IFeedback> DeleteDirectoryThumbnail(IVaultReadRequest request, bool permanent = false);
+        Task<bool> CanAccessChunkDirectory(string versionCuid, bool allowHidden);
         Task<IVaultDirResponse> GetDirectoryInfo(IVaultReadRequest input);
         Task<IFeedback<string>> GetParent(IVaultFileReadRequest input);
         Task<IFeedback<VaultFolderBrowseResponse>> BrowseFolder(IVaultReadRequest input, int page = 1, int pageSize = 50, bool includeAll = false, VaultFolderSortMode sort = VaultFolderSortMode.Id, VaultSortDirection direction = VaultSortDirection.Asc, VaultFolderItemKind kind = VaultFolderItemKind.Both, bool includeTotals = true);

@@ -29,6 +29,7 @@ namespace Haley.Utils {
                 var moduleCuid = request.Scope.Module.Cuid.ToString("N");
                 if (!_agw.ContainsKey(moduleCuid)) return fb.SetMessage($@"No adapter found for the key {moduleCuid}");
 
+                await DemandDirectoryAccess(request);
                 var wsId = await ResolveWorkspaceId(request.Scope.Workspace.Cuid.ToString("N"));
                 if (wsId < 1) return fb.SetMessage("Workspace is not registered in the core index.");
 
@@ -37,15 +38,15 @@ namespace Haley.Utils {
 
                 var totalFolders = !includeTotals || kind == VaultFolderItemKind.Files
                     ? 0
-                    : await _agw.ScalarAsync<long?>(moduleCuid, includeAll ? INSTANCE.DIRECTORY.COUNT_CHILDREN_ALL : INSTANCE.DIRECTORY.COUNT_CHILDREN, default, (WSPACE, wsId), (PARENT, folderInfo.id)) ?? 0;
+                    : await _agw.ScalarAsync<long?>(moduleCuid, includeAll ? INSTANCE.DIRECTORY.COUNT_CHILDREN_ALL : INSTANCE.DIRECTORY.COUNT_CHILDREN, default, ("@allow_hidden", request.AllowHiddenDirectories), (WSPACE, wsId), (PARENT, folderInfo.id)) ?? 0;
                 var totalFiles = !includeTotals || kind == VaultFolderItemKind.Folders
                     ? 0
-                    : await _agw.ScalarAsync<long?>(moduleCuid, includeAll ? INSTANCE.DOCUMENT.COUNT_BY_DIRECTORY_ALL : INSTANCE.DOCUMENT.COUNT_BY_DIRECTORY, default, (WSPACE, wsId), (PARENT, folderInfo.id)) ?? 0;
+                    : await _agw.ScalarAsync<long?>(moduleCuid, includeAll ? INSTANCE.DOCUMENT.COUNT_BY_DIRECTORY_ALL : INSTANCE.DOCUMENT.COUNT_BY_DIRECTORY, default, ("@allow_hidden", request.AllowHiddenDirectories), (WSPACE, wsId), (PARENT, folderInfo.id)) ?? 0;
                 var offset = (page - 1) * pageSize;
                 var fetchSize = includeTotals ? pageSize : pageSize + 1;
 
                 var query = ApplyFolderListingOptions(includeAll ? INSTANCE.DIRECTORY.BROWSE_ITEMS_ALL : INSTANCE.DIRECTORY.BROWSE_ITEMS, "browse_items", sort, direction, kind);
-                var rows = await _agw.RowsAsync(moduleCuid, query, default, (WSPACE, wsId), (PARENT, folderInfo.id), (LIMIT_ROWS, fetchSize), (OFFSET_ROWS, offset));
+                var rows = await _agw.RowsAsync(moduleCuid, query, default, ("@allow_hidden", request.AllowHiddenDirectories), (WSPACE, wsId), (PARENT, folderInfo.id), (LIMIT_ROWS, fetchSize), (OFFSET_ROWS, offset));
                 var hasNext = includeTotals
                     ? offset + rows.Count < totalFolders + totalFiles
                     : rows.Count > pageSize;
@@ -75,6 +76,7 @@ namespace Haley.Utils {
                 var moduleCuid = request.Scope.Module.Cuid.ToString("N");
                 if (!_agw.ContainsKey(moduleCuid)) return fb.SetMessage($@"No adapter found for the key {moduleCuid}");
 
+                await DemandDirectoryAccess(request);
                 var documentId = await ResolveDocumentId(moduleCuid, request, includeAll: true);
                 if (documentId < 1) return fb.SetMessage("Unable to resolve the target file.");
 
@@ -133,6 +135,7 @@ namespace Haley.Utils {
         }
 
         async Task<(bool status, string message, bool isRoot, long id, string cuid, string displayName, long parentId)> ResolveFolderInfo(string moduleCuid, IVaultReadRequest request, long workspaceId, bool includeAll = false) {
+            await DemandDirectoryAccess(request);
             var folder = request.Scope?.Folder;
             if (folder == null || (folder.Id < 1 && string.IsNullOrWhiteSpace(folder.Cuid) && string.IsNullOrWhiteSpace(folder.DisplayName))) {
                 return (true, string.Empty, true, 0, string.Empty, string.Empty, 0);
@@ -191,7 +194,7 @@ namespace Haley.Utils {
             var deleteState = row.GetInt("delete_state");
             var documentDeleteState = row.GetNullableInt("document_delete_state");
             var versionDeleteState = row.GetNullableInt("version_delete_state");
-            return new VaultBrowseItem { ItemType = row.GetString("item_type") ?? string.Empty, Id = row.GetLong("id"), Cuid = row.GetString("uid") ?? string.Empty, DisplayName = row.GetString("display_name") ?? string.Empty, ActorId = row.GetNullableLong("actor_id"), ParentId = row.GetLong("parent_id"), VirtualPath = row.GetString("virtual_path") ?? string.Empty, DeleteState = deleteState, IsDeleted = deleteState > 0, Deleted = row.GetDateTime("deleted"), DocumentDeleteState = documentDeleteState, DocumentIsDeleted = documentDeleteState > 0, DocumentDeleted = row.GetDateTime("document_deleted"), LatestVersionDeleteState = versionDeleteState, LatestVersionIsDeleted = versionDeleteState > 0, LatestVersionDeleted = row.GetDateTime("version_deleted"), Created = row.GetDateTime("created"), Modified = row.GetDateTime("modified"), LatestVersionId = row.GetNullableLong("version_id"), LatestVersionCuid = row.GetString("version_cuid") ?? string.Empty, LatestVersionNumber = row.GetNullableInt("version_no"), VersionCount = row.GetNullableInt("version_count"), HasThumbnail = row.GetInt("has_thumbnail") > 0, LatestVersionCreated = row.GetDateTime("version_created"), Size = row.GetNullableLong("size"), StorageName = row.GetString("storage_name") ?? string.Empty, StagingRef = row.GetString("staging_ref") ?? string.Empty, StorageRef = row.GetString("storage_ref") ?? string.Empty, Flags = row.GetNullableInt("flags"), Hash = row.GetString("hash") ?? string.Empty, SyncedAt = row.GetDateTime("synced_at") };
+            return new VaultBrowseItem { IsHidden = row.GetInt("is_hidden") > 0, ItemType = row.GetString("item_type") ?? string.Empty, Id = row.GetLong("id"), Cuid = row.GetString("uid") ?? string.Empty, DisplayName = row.GetString("display_name") ?? string.Empty, ActorId = row.GetNullableLong("actor_id"), ParentId = row.GetLong("parent_id"), VirtualPath = row.GetString("virtual_path") ?? string.Empty, DeleteState = deleteState, IsDeleted = deleteState > 0, Deleted = row.GetDateTime("deleted"), DocumentDeleteState = documentDeleteState, DocumentIsDeleted = documentDeleteState > 0, DocumentDeleted = row.GetDateTime("document_deleted"), LatestVersionDeleteState = versionDeleteState, LatestVersionIsDeleted = versionDeleteState > 0, LatestVersionDeleted = row.GetDateTime("version_deleted"), Created = row.GetDateTime("created"), Modified = row.GetDateTime("modified"), LatestVersionId = row.GetNullableLong("version_id"), LatestVersionCuid = row.GetString("version_cuid") ?? string.Empty, LatestVersionNumber = row.GetNullableInt("version_no"), VersionCount = row.GetNullableInt("version_count"), HasThumbnail = row.GetInt("has_thumbnail") > 0, LatestVersionCreated = row.GetDateTime("version_created"), Size = row.GetNullableLong("size"), StorageName = row.GetString("storage_name") ?? string.Empty, StagingRef = row.GetString("staging_ref") ?? string.Empty, StorageRef = row.GetString("storage_ref") ?? string.Empty, Flags = row.GetNullableInt("flags"), Hash = row.GetString("hash") ?? string.Empty, SyncedAt = row.GetDateTime("synced_at") };
         }
 
         static string ApplyFolderListingOptions(string sql, string alias, VaultFolderSortMode sort, VaultSortDirection direction, VaultFolderItemKind kind) {

@@ -30,7 +30,9 @@ namespace Haley.Services {
         /// Single responsibility: orchestrate the three steps below and return both paths.
         /// </summary>
         public (string basePath, string targetPath) ProcessAndBuildStoragePath(IVaultReadRequest input, bool allowRootAccess = false) {
-            PrepareRequestContext(input);                          // 1. Normalise CUID, mark virtual folder
+            PrepareRequestContext(input);
+            Indexer?.DemandDirectoryAccess(input).GetAwaiter().GetResult(); // Validate before registration.
+            // 1. Normalise CUID, mark virtual folder
             ResolveTargetWorkspaceContextAsync(input).GetAwaiter().GetResult();
             EnsureWorkspaceContextAsync(input).GetAwaiter().GetResult();
             var provider = ResolveProvider(input);                 // 2. Resolve provider once for all steps
@@ -38,6 +40,7 @@ namespace Haley.Services {
             if (input is IVaultFileReadRequest fileRead)
                 ProcessFileRoute(fileRead, provider).Wait();       // 4. Resolve file path (may query/register indexer)
 
+            Indexer?.DemandDirectoryAccess(input).GetAwaiter().GetResult(); // Recheck resolved processed-file identifiers.
             // 5. Provider joins base path + file ref using its own separator and validation rules.
             var fileRef = (input is IVaultFileReadRequest fr && fr.File != null)
                 ? fr.File.StorageRef ?? string.Empty
@@ -158,6 +161,8 @@ namespace Haley.Services {
         /// has no storage_ref yet (placeholder) or when either extension is absent.
         /// </summary>
         async Task CheckCuidExtensionConsistency(IVaultFileReadRequest input, IVaultFileWriteRequest inputW, bool forupload) {
+            // Managed directory images retain their document history across supported image formats.
+            if (inputW is StorageWriteRequest { IsDirectoryThumbnail: true }) return;
             if (!forupload || string.IsNullOrWhiteSpace(input.File?.Cuid)) return; // only check when targeting a specific version
 
             var incomingExt = Path.GetExtension(inputW?.OriginalName ?? string.Empty)?.ToLowerInvariant();
@@ -328,7 +333,8 @@ namespace Haley.Services {
 
             // Format policy is skipped for thumbnail uploads — thumbnails use their own allowed extensions
             // (ThumbAllowedExtensions) validated at the controller level before reaching here.
-            if (forupload && (input as IVaultFileWriteRequest)?.IsThumbnail != true && !IsFormatAllowed(targetExtension, FormatControlMode.Extension))
+            if (forupload && inputW?.IsThumbnail != true && inputW is not StorageWriteRequest { IsDirectoryThumbnail: true }
+                && !IsFormatAllowed(targetExtension, FormatControlMode.Extension))
                 throw new ArgumentException("Uploading this file format is not allowed.");
 
             if (string.IsNullOrWhiteSpace(input.RequestedName) && !string.IsNullOrWhiteSpace(targetFileName))
@@ -398,16 +404,25 @@ namespace Haley.Services {
                     SplitProvider,
                     Config.SuffixFile);
 
+            // A failed first thumbnail upload can leave a reserved document name with a different extension.
+            // Keep that identity, but describe the accepted image bytes with their actual extension.
+            var storageName = holder.StorageName;
+            if (inputW is StorageWriteRequest { IsDirectoryThumbnail: true }) {
+                var imageExtension = Path.GetExtension(inputW.OriginalName);
+                targetFilePath = Path.ChangeExtension(targetFilePath, imageExtension);
+                storageName = Path.ChangeExtension(storageName, imageExtension);
+            }
+
             if (input.File == null)
                 input.SetFile(new StorageFileRoute(targetFileName, targetFilePath) {
-                    Id = holder.Id, Cuid = holder.Cuid.ToString("N"), Version = holder.Version, StorageName = holder.StorageName
+                    Id = holder.Id, Cuid = holder.Cuid.ToString("N"), Version = holder.Version, StorageName = storageName
                 });
 
             input.File.StorageRef = targetFilePath;
 
             if (string.IsNullOrWhiteSpace(input.File.DisplayName)) input.File.SetDisplayName(input.RequestedName);
             if (string.IsNullOrWhiteSpace(input.File.Cuid)) input.File.SetCuid(holder.Cuid);
-            if (string.IsNullOrWhiteSpace(input.File.StorageName)) input.File.StorageName = holder.StorageName;
+            if (string.IsNullOrWhiteSpace(input.File.StorageName)) input.File.StorageName = storageName;
             if (input.File.Id < 1) input.File.SetId(holder.Id);
             if (input.File is StorageFileRoute sfrReg && string.IsNullOrWhiteSpace(sfrReg.RootCuid))
                 sfrReg.RootCuid = holder.DocumentCuid;

@@ -26,7 +26,9 @@ namespace Haley.Services {
 
                 // Resolve the content version so we can look up its ver number and document id.
                 PrepareRequestContext(request);
+                await Indexer.DemandDirectoryAccess(request);
                 await ProcessFileRoute(request);
+                await Indexer.DemandDirectoryAccess(request);
 
                 if (request.File == null || string.IsNullOrWhiteSpace(request.File.Cuid)) {
                     result.Message = "Unable to resolve content version from request.";

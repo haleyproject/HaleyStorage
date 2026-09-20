@@ -27,6 +27,8 @@ namespace Haley.Utils {
             try {
                 if (request == null) return fb.SetMessage("Request cannot be null.");
                 if (string.IsNullOrWhiteSpace(folderName)) return fb.SetMessage("Folder name cannot be empty.");
+                DirectoryVisibility.ValidateName(folderName, request.AllowHiddenDirectories);
+                await DemandDirectoryAccess(request);
                 if (request.ReadOnlyMode) return fb.SetMessage("Cannot create a folder in read-only mode.");
 
                 var ws = await EnsureWorkSpace(request);
@@ -42,8 +44,8 @@ namespace Haley.Utils {
                     var f = request.Scope.Folder;
                     if (!string.IsNullOrWhiteSpace(f.Cuid) || !string.IsNullOrWhiteSpace(f.DisplayName)) {
                         var parentInfo = await ResolveFolderInfo(dbid, request, ws.id);
-                        if (parentInfo.status && !parentInfo.isRoot)
-                            parentId = parentInfo.id;
+                        if (!parentInfo.status) return fb.SetMessage(parentInfo.message);
+                        if (!parentInfo.isRoot) parentId = parentInfo.id;
                     }
                 }
 

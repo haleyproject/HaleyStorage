@@ -48,6 +48,9 @@ namespace Haley.Utils {
                 if (!docId.HasValue || docId.Value < 1)
                     throw new ArgumentException($"No document found for version CUID '{versionCuid}'.");
 
+                var documentState = await _agw.ScalarAsync<int?>(moduleCuid, INSTANCE.DOCUMENT.LOCK_DELETE_STATE, load, (ID, docId.Value));
+                if (documentState != 0) throw new InvalidOperationException("Cannot add a version to a deleted document.");
+
                 // 2. Determine next content version number (sub_ver=0 only).
                 // Use all historical versions, not only active ones, so version numbers are never reused.
                 var currentMax = await _agw.ScalarAsync<int?>(moduleCuid, INSTANCE.DOCVERSION.FIND_MAX_CONTENT_VERSION, load, (PARENT, docId.Value));

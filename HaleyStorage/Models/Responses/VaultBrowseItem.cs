@@ -7,6 +7,7 @@ namespace Haley.Models {
     /// making a second round trip for every item.
     /// </summary>
     public class VaultBrowseItem {
+        public bool IsHidden { get; set; }
         public string ItemType { get; set; } = string.Empty; // "folder" | "file"
         public long Id { get; set; }
         public string Cuid { get; set; } = string.Empty;

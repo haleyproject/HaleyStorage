@@ -13,6 +13,17 @@ namespace Haley.Services {
     /// </summary>
     internal interface IVaultIndexing {
         bool ThrowExceptions { get; }
+        Task DemandDirectoryAccess(IVaultReadRequest request, long? versionId = null, string versionCuid = null, string documentCuid = null);
+        Task<bool> IsHiddenVersion(string moduleCuid, long versionId);
+        Task<VaultDirectoryInfo> GetDirectoryMetadata(IVaultReadRequest request);
+        Task SetDirectoryMetadata(IVaultReadRequest request, string metadata);
+        Task RenameDirectory(IVaultReadRequest request, string name);
+        Task<DirectoryThumbnailTarget> EnsureDirectoryThumbnail(IVaultReadRequest request, string extension);
+        Task<DeletedDocumentInfo> GetDirectoryThumbnailDocument(IVaultReadRequest request);
+        Task ClearDirectoryThumbnail(IVaultReadRequest request, string rootCuid);
+        Task DeleteLatestDirectoryThumbnail(IVaultReadRequest request, DeletedDocumentInfo document);
+        Task<DeletedDocumentInfo> PrepareDirectoryThumbnailPurge(IVaultReadRequest request, string rootCuid);
+        Task CompleteDirectoryThumbnailPurge(IVaultReadRequest request, DeletedDocumentInfo document);
         Task<IFeedback> RegisterClient(IVaultClient info);
         Task<IFeedback> RegisterModule(IVaultModule info);
         Task<IFeedback> RegisterWorkspace(IVaultWorkSpace info);

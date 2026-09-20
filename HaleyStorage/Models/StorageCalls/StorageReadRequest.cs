@@ -17,6 +17,7 @@ namespace Haley.Models {
         public string OverrideRef { get; set; }
         public string RequestedName { get; set; }
         public bool ReadOnlyMode { get; set; }
+        public bool AllowHiddenDirectories { get; set; }
         internal bool WorkspaceIsVirtual { get; private set; }
 
         /// <summary>

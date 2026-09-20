@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS `directory` (
 
 -- Data exporting was unselected.
 
+CREATE TABLE IF NOT EXISTS `dir_info` (
+  `dir_id` bigint(20) NOT NULL,
+  `metadata` text DEFAULT NULL,
+  `uri` varchar(48) DEFAULT NULL COMMENT 'Managed directory thumbnail document root CUID, not an external URL.',
+  PRIMARY KEY (`dir_id`),
+  CONSTRAINT `fk_dir_info_directory` FOREIGN KEY (`dir_id`) REFERENCES `directory` (`id`) ON DELETE NO ACTION ON UPDATE NO ACTION
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Optional directory metadata and stable thumbnail document reference.';
+
 -- Dumping structure for table dss_client.document
 CREATE TABLE IF NOT EXISTS `document` (
   `id` bigint(20) NOT NULL AUTO_INCREMENT COMMENT 'Surrogate PK. Referenced by doc_version.parent, doc_info.file, and other version-level tables.',

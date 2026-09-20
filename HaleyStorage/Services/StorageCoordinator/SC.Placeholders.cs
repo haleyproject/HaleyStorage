@@ -49,7 +49,8 @@ namespace Haley.Services {
                 var writeReq = new StorageWriteRequest(request.Scope?.Client?.Name, request.Scope?.Module?.Name, request.Scope?.Workspace?.Name) {
                     OriginalName = fileName,
                     FileStream = null,
-                    Actor = request.Actor
+                    Actor = request.Actor,
+                    AllowHiddenDirectories = request.AllowHiddenDirectories
                 };
                 writeReq.Scope.Folder = request.Scope?.Folder;
 
@@ -124,6 +125,7 @@ namespace Haley.Services {
                 PrepareRequestContext(request);
                 var moduleCuid = StorageUtils.GenerateCuid(request, Haley.Enums.VaultObjectType.Module);
                 var normalizedCuid = parsedCuid.ToString("N");
+                await Indexer.DemandDirectoryAccess(request, versionCuid: normalizedCuid);
                 var existing = await Indexer.GetDocVersionInfo(moduleCuid, normalizedCuid).ConfigureAwait(false);
                 if (existing?.Status != true || existing.Result is not Dictionary<string, object> row || row.Count < 1)
                     return fb.SetMessage($"Placeholder {normalizedCuid} was not found.");

@@ -180,6 +180,10 @@ namespace Haley.Services {
             string versionCuid = null,
             string documentCuid = null) {
 
+            if (Indexer != null) {
+                try { await Indexer.DemandDirectoryAccess(request, versionId, versionCuid, documentCuid); }
+                catch (Exception ex) { return new Feedback(false, ex.Message); }
+            }
             var scoped = CheckWriteAccess(request);
             var policy = _writePolicy;
             if (!scoped.Status || policy.WorkspaceWrites.Count == 0 || Indexer == null)

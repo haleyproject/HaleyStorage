@@ -368,6 +368,7 @@ namespace Haley.Services {
         /// </summary>
         public async Task<IFeedback<string>> GetParent(IVaultFileReadRequest input) {
             input.Scope.Workspace.SetCuid(StorageUtils.GenerateCuid(input, Enums.VaultObjectType.WorkSpace));
+            if (Indexer != null) await Indexer.DemandDirectoryAccess(input);
             return await Indexer?.GetParentName(input);
         }
 

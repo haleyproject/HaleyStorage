@@ -60,6 +60,9 @@ namespace Haley.Utils {
         /// </summary>
         async Task<(bool status, (long id, string uid) result)> EnsureDirectory(IVaultReadRequest request, long ws_id) {
             if (ws_id == 0) return (false, (0, string.Empty));
+            await DemandDirectoryAccess(request);
+            if (!string.IsNullOrWhiteSpace(request.Scope.Folder?.DisplayName))
+                DirectoryVisibility.ValidateName(request.Scope.Folder.DisplayName, request.AllowHiddenDirectories);
             var dbid = request.Scope.Module.Cuid.ToString("N");
             //If directory name is not provided, then go for "default" as usual
             var dirId = request.Scope.Folder?.Id ?? 0;
@@ -79,6 +82,8 @@ namespace Haley.Utils {
             Func<(string query, (string key, object value)[] parameters)> insertDirectory = () => (INSTANCE.DIRECTORY.INSERT, Consolidate((WSPACE, ws_id), (PARENT, dirParent), (NAME, dirDbName), (DNAME, dirName), (ACTOR, actor)));
 
             var existing = await InsertAndFetchIDRead(dbid, checkDirectory, readOnly: true, callId: request.CallID);
+            if (existing.id < 1 && (dirId > 0 || !string.IsNullOrWhiteSpace(dirCuid)))
+                throw new InvalidOperationException("The requested folder is not available.");
             var wasCreated = existing.id < 1 && !request.ReadOnlyMode;
             var dirInfo = existing.id > 0
                 ? existing
