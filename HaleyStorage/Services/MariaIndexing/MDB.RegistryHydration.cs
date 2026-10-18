@@ -23,7 +23,7 @@ namespace Haley.Utils {
             var moduleName = row.GetString("name");
             var moduleDisplayName = row.GetString("display_name");
             if (string.IsNullOrWhiteSpace(clientName) || string.IsNullOrWhiteSpace(moduleName))
-                return false;
+                throw new InvalidOperationException($"Registered module '{moduleCuid}' has no valid client/module identity.");
 
             var client = new VaultClient("registry", "registry", "registry", clientDisplayName ?? clientName) {
                 Id = row.GetLong("client_id")

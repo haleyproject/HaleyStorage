@@ -450,6 +450,9 @@ namespace Haley.Services {
             IVaultFileWriteRequest inputW = input as IVaultFileWriteRequest;
             bool forupload = inputW != null;
 
+            if (forupload && !Indexer.IsModuleAdapterRegistered(input.Scope.Module.Cuid.ToString("N")))
+                throw new InvalidOperationException($"Module adapter for '{input.Scope.Client.Name}/{input.Scope.Module.Name}' is not loaded in this Storage API process. Configure this module in Seed:OSSSource or explicitly activate it before uploading.");
+
             if (!Indexer.TryGetComponentInfo<VaultWorkSpace>(input.Scope.Workspace.Cuid.ToString("N"), out VaultWorkSpace wInfo) && forupload) {
                 throw new Exception($"Unable to find workspace info. Name: {input.Scope.Workspace.Name} — Cuid: {input.Scope.Workspace.Cuid}.");
             }

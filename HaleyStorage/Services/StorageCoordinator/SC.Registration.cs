@@ -160,6 +160,18 @@ namespace Haley.Services {
             return result;
         }
 
+        async Task<bool> ActivateConfiguredModuleAsync(string client, string module) {
+            client = client.ToDBName();
+            module = module.ToDBName();
+            var status = await ActivateModuleRuntimeAsync(client, module);
+            if (!status.Hydrated || !status.AdapterLoaded) return false;
+
+            _logger?.LogInformation(
+                "Storage startup module ready: Client={Client}; Module={Module}; DefaultWorkspace=default; AdapterLoaded=true.",
+                client, module);
+            return true;
+        }
+
         async Task<IFeedback> EnsureDefaultWorkspaceAsync(string client, string module) {
             var defaultWorkspaceCuid = StorageUtils.GenerateCuid(client, module, VaultConstants.DEFAULT_NAME);
             if (Indexer.TryGetComponentInfo<VaultWorkSpace>(defaultWorkspaceCuid, out _)
@@ -177,7 +189,7 @@ namespace Haley.Services {
 
         /// <summary>
         /// Reads the <c>Seed:OSSSource</c> configuration section (or the provided <paramref name="section"/>)
-        /// and registers all clients, modules, and workspaces declared there.
+        /// and activates each configured module, creating missing clients/modules when necessary.
         /// Ensures every named client exists, even when its optional password is omitted.
         /// Preserves existing client details and credentials; deduplicates registrations within a single call.
         /// </summary>
@@ -207,7 +219,20 @@ namespace Haley.Services {
                         "Registering configured Storage source: Client={Client}; Module={Module}; Workspace={Workspace}.",
                         source.Client, source.Module, string.IsNullOrWhiteSpace(source.Workspace) ? VaultConstants.DEFAULT_NAME : source.Workspace);
                     var cliKey = source.Client.ToDBName();
+                    var modKey = string.IsNullOrWhiteSpace(source.Module) ? null : $"{cliKey}_{source.Module.ToDBName()}";
                     try {
+                        if (modKey is not null && !modules.Contains(modKey)) {
+                            if (!new VaultObject(source.Client).TryValidate(out var validation)
+                                || !new VaultObject(source.Module).TryValidate(out validation)) {
+                                failures.Add(validation);
+                                continue;
+                            }
+                            if (await ActivateConfiguredModuleAsync(source.Client, source.Module)) {
+                                modules.Add(modKey);
+                                if (!clients.Contains(cliKey)) clients.Add(cliKey);
+                            }
+                        }
+
                         if (!clients.Contains(cliKey)) {
                             var clientResult = await RegisterClientInternal(new VaultObject(source.Client), source.Password,
                                 addDefaultModule: false, createOnly: true);
@@ -218,18 +243,18 @@ namespace Haley.Services {
                             clients.Add(cliKey);
                         }
 
-                        if (string.IsNullOrWhiteSpace(source.Module)) continue;
-                        var modKey = $"{cliKey}_{source.Module.ToDBName()}";
+                        if (modKey is null) continue;
                         if (!modules.Contains(modKey)) {
                             var moduleResult = await RegisterModule(source.Module, source.Client);
                             if (moduleResult?.Status != true) {
                                 failures.Add(moduleResult?.Message ?? $"Unable to register module '{source.Module}'.");
                                 continue;
                             }
+                            if (!await ActivateConfiguredModuleAsync(source.Client, source.Module)) {
+                                failures.Add($"Configured module '{source.Client}/{source.Module}' could not be activated.");
+                                continue;
+                            }
                             modules.Add(modKey);
-                            _logger?.LogInformation(
-                                "Storage startup module ready: Client={Client}; Module={Module}; DefaultWorkspace=default; AdapterLoaded=true.",
-                                source.Client, source.Module);
                         }
 
                         if (string.IsNullOrWhiteSpace(source.Workspace)) {

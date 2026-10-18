@@ -218,6 +218,8 @@ namespace Haley.Utils {
             if (result is null || !result.Status)
                 throw new InvalidOperationException(
                     result?.Message ?? $"Unable to initialize module database '{info.DatabaseName}'.");
+            if (!_agw.ContainsKey(info.Cuid.ToString("N")))
+                throw new InvalidOperationException($"Module '{info.Client.Name}/{info.Name}' database initialization did not register its runtime adapter.");
         }
     }
 }
