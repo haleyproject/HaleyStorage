@@ -15,7 +15,7 @@ namespace Haley.Utils {
             }
 
             await EnsureValidation();
-            var row = await _agw.RowAsync(_key, MODULE.GET_BY_CUID, default, (CUID, moduleCuid));
+            var row = await _agw.RowAsync(_key, MODULE.GET_BY_CUID, new DbExecutionLoad(default), (CUID, moduleCuid));
             if (row == null || row.Count == 0) return false;
 
             var clientName = row.GetString("client_name");
@@ -70,7 +70,7 @@ namespace Haley.Utils {
             if (!forceRefresh && TryGetComponentInfo<VaultWorkSpace>(workspaceCuid, out _)) return true;
 
             await EnsureValidation();
-            var row = await _agw.RowAsync(_key, WORKSPACE.GET_BY_CUID, default, (CUID, workspaceCuid));
+            var row = await _agw.RowAsync(_key, WORKSPACE.GET_BY_CUID, new DbExecutionLoad(default), (CUID, workspaceCuid));
             if (row == null || row.Count == 0) return false;
 
             var clientName = row.GetString("client_name");

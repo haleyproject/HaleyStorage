@@ -53,13 +53,16 @@ namespace Haley.Models {
 
         void UpdateCUID() {
             if (Scope?.Client == null) return;
-            if (Scope.Module != null) Scope.Module.UpdateCUID(Scope.Client.Name);
-            if (Scope.Workspace != null) Scope.Workspace.UpdateCUID(Scope.Client.Name, Scope.Module?.Name);
+            Scope.Client.UpdateCUID(Scope.Client.Name);
+            // Supply each complete hierarchy explicitly, including repeated names such as default/default.
+            if (Scope.Module != null) Scope.Module.UpdateCUID(Scope.Client.Name, Scope.Module.Name);
+            if (Scope.Workspace != null) Scope.Workspace.UpdateCUID(Scope.Client.Name, Scope.Module?.Name, Scope.Workspace.Name);
         }
 
         /// <summary>Sets the workspace by name.</summary>
         public IVaultReadRequest SetWorkspace(string name, bool isVirtual = false) {
-            Scope.Workspace = new VaultObject(name).UpdateCUID(Scope.Client?.Name, Scope.Module?.Name);
+            Scope.Workspace = new VaultObject(name);
+            Scope.Workspace.UpdateCUID(Scope.Client?.Name, Scope.Module?.Name, Scope.Workspace.Name);
             WorkspaceIsVirtual = isVirtual || Scope.Workspace.Name.Equals(VaultConstants.DEFAULT_NAME, StringComparison.OrdinalIgnoreCase);
             return this;
         }
@@ -70,9 +73,10 @@ namespace Haley.Models {
 
         public StorageReadRequest(string client_name, string module_name, string workspace_name) {
             Scope = new StorageScope();
-            Scope.Client = new VaultObject(client_name).UpdateCUID();
-            Scope.Module = new VaultObject(module_name).UpdateCUID(Scope.Client.Name);
-            Scope.Workspace = new VaultObject(workspace_name).UpdateCUID(Scope.Client.Name, Scope.Module.Name);
+            Scope.Client = new VaultObject(client_name);
+            Scope.Module = new VaultObject(module_name);
+            Scope.Workspace = new VaultObject(workspace_name);
+            UpdateCUID();
             WorkspaceIsVirtual = Scope.Workspace.Name.Equals(VaultConstants.DEFAULT_NAME, StringComparison.OrdinalIgnoreCase);
         }
     }

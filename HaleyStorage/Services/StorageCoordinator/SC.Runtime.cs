@@ -28,8 +28,8 @@ namespace Haley.Services {
         }
 
         /// <summary>
-        /// Loads an existing module database adapter into this process. This remains available when
-        /// storage write mode is disabled because it does not mutate stored content or the filesystem.
+        /// Loads an existing module database adapter into this process and ensures its default workspace.
+        /// This remains available when storage write mode is disabled because it does not mutate stored content.
         /// </summary>
         public async Task<StorageModuleRuntimeStatus> ActivateModuleRuntimeAsync(string client, string module) {
             ArgumentException.ThrowIfNullOrWhiteSpace(client);
@@ -37,6 +37,12 @@ namespace Haley.Services {
 
             var moduleCuid = StorageUtils.GenerateCuid(client, module);
             var hydrated = Indexer != null && await Indexer.HydrateModuleAsync(moduleCuid).ConfigureAwait(false);
+            if (hydrated) {
+                await EnsureModulesHaveDefaultProfileAsync().ConfigureAwait(false);
+                var workspace = await EnsureDefaultWorkspaceAsync(client, module).ConfigureAwait(false);
+                if (workspace?.Status != true)
+                    throw new InvalidOperationException(workspace?.Message ?? "Unable to register the default workspace.");
+            }
             var status = await GetModuleRuntimeStatusAsync(client, module).ConfigureAwait(false);
             status.Hydrated = hydrated && status.AdapterLoaded;
             status.Message = status.Hydrated

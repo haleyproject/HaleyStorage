@@ -123,7 +123,7 @@ namespace Haley.Utils {
             ITransactionHandler handler = GetTransactionHandlerCache(callId, dbid);
 
             var checkInput = check.Invoke();
-            var load = new DbExecutionLoad(default, handler, false);
+            var load = new DbExecutionLoad(default, handler);
             var checkArgs = Array.ConvertAll(checkInput.parameters, p => (DbArg)p);
             long? id = null;
             if (preCheck) id = await _agw.ScalarAsync<long?>(dbid, checkInput.query, load, checkArgs);
@@ -148,7 +148,7 @@ namespace Haley.Utils {
             var checkInput = check.Invoke();
             ITransactionHandler handler = GetTransactionHandlerCache(callId, dbid);
 
-            var load = new DbExecutionLoad(default, handler, false);
+            var load = new DbExecutionLoad(default, handler);
             var checkArgs = Array.ConvertAll(checkInput.parameters, p => (DbArg)p);
             DbRow row = null;
             if (preCheck) row = await _agw.RowAsync(dbid, checkInput.query, load, checkArgs);
@@ -245,11 +245,11 @@ namespace Haley.Utils {
 
                 (long id, Guid guid) result = (0, Guid.Empty);
                 var ws = await EnsureWorkSpace(request);
-                if (!ws.status) return result;
+                if (!ws.status) throw new InvalidOperationException("Document registration could not resolve its workspace.");
                 var dir = await EnsureDirectory(request, ws.id);
-                if (!dir.status) return result;
+                if (!dir.status || dir.result.id < 1) throw new InvalidOperationException("Document registration could not resolve its directory.");
                 var ns = await EnsureNameStore(request);
-                if (!ns.status) return result;
+                if (!ns.status || ns.id < 1) throw new InvalidOperationException("Document registration could not resolve its file name.");
 
                 var docInfo = await InsertAndFetchIDRead(dbid,() => (INSTANCE.DOCUMENT.EXISTS, Consolidate((PARENT, dir.result.id), (NAME, ns.id))), callId: request.CallID);
                 bool docExists = docInfo.id != 0;
@@ -278,13 +278,11 @@ namespace Haley.Utils {
                      readOnly: request.ReadOnlyMode,
                     $@"Unable to insert document version for the document {docInfo.id}", false, callId: request.CallID);
 
-                if (dvInfo.id > 0 && !string.IsNullOrWhiteSpace(dvInfo.uid)) {
-                    //Check if the incoming uid is in proper GUID format.
-                    Guid dvId = Guid.Empty;
-                    if (dvInfo.uid.IsValidGuid(out dvId) || dvInfo.uid.IsCompactGuid(out dvId)) {
-                        result = (dvInfo.id, dvId);
-                    }
-                }
+                Guid dvId = Guid.Empty;
+                if (dvInfo.id < 1 || string.IsNullOrWhiteSpace(dvInfo.uid)
+                    || !(dvInfo.uid.IsValidGuid(out dvId) || dvInfo.uid.IsCompactGuid(out dvId)))
+                    throw new InvalidOperationException("Document version registration did not return a valid ID and CUID.");
+                result = (dvInfo.id, dvId);
 
                 if (holder != null) {
                     holder.SetCuid(result.guid);
@@ -295,15 +293,16 @@ namespace Haley.Utils {
 
                 return result;
             } catch (Exception ex) {
-                _logger?.LogError(ex.Message + Environment.NewLine + ex.StackTrace);
+                _logger?.LogError(ex, "Storage document registration failed.");
                 var dbid = request.Scope.Module.Cuid.ToString("N");
                 var handlerKey = GetHandlerKey(request.CallID, dbid);
                 if (!string.IsNullOrWhiteSpace(handlerKey) && _handlers.ContainsKey(handlerKey)) {
                     _handlers[handlerKey].handler?.Rollback(); //roll everything back.
                     _handlers.Remove(handlerKey,out _);
                 }
-                if (ThrowExceptions) throw ex; //For Parse mode, let us not throw any exceptions.
-                return (0, Guid.Empty);
+                // The coordinator owns the public failure response. Preserve the cause rather than
+                // turning a failed registration into an unrelated invalid-ID error in path generation.
+                throw;
             }
         }
        

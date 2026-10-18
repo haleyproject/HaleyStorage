@@ -38,7 +38,7 @@ namespace Haley.Services {
             var provider = ResolveProvider(input);                 // 2. Resolve provider once for all steps
             var bpath = FetchWorkspaceBasePath(input, provider);   // 3. Resolve workspace base path (cached)
             if (input is IVaultFileReadRequest fileRead)
-                ProcessFileRoute(fileRead, provider).Wait();       // 4. Resolve file path (may query/register indexer)
+                ProcessFileRoute(fileRead, provider).GetAwaiter().GetResult(); // 4. Resolve file path (may query/register indexer)
 
             Indexer?.DemandDirectoryAccess(input).GetAwaiter().GetResult(); // Recheck resolved processed-file identifiers.
             // 5. Provider joins base path + file ref using its own separator and validation rules.

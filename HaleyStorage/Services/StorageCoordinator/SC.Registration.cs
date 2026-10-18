@@ -83,25 +83,16 @@ namespace Haley.Services {
             result.Result = idxResult.Result;
 
             // Modules registered at runtime must inherit the persisted default provider profile.
+            if (!await Indexer.HydrateModuleAsync(moduleInfo.Cuid.ToString("N")))
+                return result.SetStatus(false).SetMessage($"Unable to load module adapter for '{client.Name}/{module.Name}'.");
+
             await EnsureModulesHaveDefaultProfileAsync();
 
             // A missing w always maps to the virtual default workspace. Ensure it exists without
             // updating an existing workspace's immutable naming or routing configuration.
-            var defaultWorkspaceCuid = StorageUtils.GenerateCuid(client.Name, module.Name, VaultConstants.DEFAULT_NAME);
-            var hasDefaultWorkspace = Indexer.TryGetComponentInfo<VaultWorkSpace>(defaultWorkspaceCuid, out _)
-                || await Indexer.HydrateWorkspaceAsync(defaultWorkspaceCuid);
-            if (!hasDefaultWorkspace) {
-                var workspaceResult = await RegisterWorkSpace(
-                    VaultConstants.DEFAULT_NAME,
-                    client.DisplayName,
-                    module.DisplayName,
-                    VaultNameMode.Number,
-                    VaultNameParseMode.Generate,
-                    is_virtual: true);
-                if (workspaceResult?.Status != true)
-                    return result.SetStatus(false).SetMessage(workspaceResult?.Message ?? "Unable to register the default workspace.");
-            }
-
+            var workspaceResult = await EnsureDefaultWorkspaceAsync(client.DisplayName, module.DisplayName);
+            if (workspaceResult?.Status != true)
+                return result.SetStatus(false).SetMessage(workspaceResult?.Message ?? "Unable to register the default workspace.");
             return result;
         }
 
@@ -169,13 +160,29 @@ namespace Haley.Services {
             return result;
         }
 
+        async Task<IFeedback> EnsureDefaultWorkspaceAsync(string client, string module) {
+            var defaultWorkspaceCuid = StorageUtils.GenerateCuid(client, module, VaultConstants.DEFAULT_NAME);
+            if (Indexer.TryGetComponentInfo<VaultWorkSpace>(defaultWorkspaceCuid, out _)
+                || await Indexer.HydrateWorkspaceAsync(defaultWorkspaceCuid))
+                return new Feedback(true, "Default workspace is available.");
+
+            return await RegisterWorkSpace(
+                VaultConstants.DEFAULT_NAME,
+                client,
+                module,
+                VaultNameMode.Number,
+                VaultNameParseMode.Generate,
+                is_virtual: true);
+        }
+
         /// <summary>
-        /// Reads the <c>Seed:sources</c> configuration section (or the provided <paramref name="section"/>)
+        /// Reads the <c>Seed:OSSSource</c> configuration section (or the provided <paramref name="section"/>)
         /// and registers all clients, modules, and workspaces declared there.
         /// Ensures every named client exists, even when its optional password is omitted.
         /// Preserves existing client details and credentials; deduplicates registrations within a single call.
         /// </summary>
         /// <param name="section">Optional override section; reads from app config when null.</param>
+
         public async Task<IFeedback> RegisterFromSource(IConfigurationSection section = null) {
             try {
                 var result = new Feedback();
@@ -185,7 +192,7 @@ namespace Haley.Services {
                 }
                 var sources = section.AsDictionaryList();
                 var sourceList = sources.Where(p => p.Count > 0 && p.First().Value is Dictionary<string, object>).Select(q => ((Dictionary<string, object>)q.First().Value).Map<DSSRegInfo>()).ToList();
-                if (sourceList == null || sourceList.Count < 0) return result.SetMessage("Unable to parse registration info from the given configuration section.");
+                _logger?.LogInformation("Storage startup sources: Count={SourceCount}.", sourceList.Count);
                 ReplaceWritePolicies(sourceList);
 
                 var clients = new List<string>();
@@ -196,6 +203,9 @@ namespace Haley.Services {
 
                 foreach (var source in sourceList) {
                     if (string.IsNullOrWhiteSpace(source.Client)) continue;
+                    _logger?.LogInformation(
+                        "Registering configured Storage source: Client={Client}; Module={Module}; Workspace={Workspace}.",
+                        source.Client, source.Module, string.IsNullOrWhiteSpace(source.Workspace) ? VaultConstants.DEFAULT_NAME : source.Workspace);
                     var cliKey = source.Client.ToDBName();
                     try {
                         if (!clients.Contains(cliKey)) {
@@ -217,6 +227,9 @@ namespace Haley.Services {
                                 continue;
                             }
                             modules.Add(modKey);
+                            _logger?.LogInformation(
+                                "Storage startup module ready: Client={Client}; Module={Module}; DefaultWorkspace=default; AdapterLoaded=true.",
+                                source.Client, source.Module);
                         }
 
                         if (string.IsNullOrWhiteSpace(source.Workspace)) {
@@ -248,6 +261,10 @@ namespace Haley.Services {
                 }
 
                 await InitializePersistedRegistryState();
+
+                _logger?.LogInformation(
+                    "Storage startup registration completed: Clients={ClientCount}; Modules={ModuleCount}; Failures={FailureCount}; Skipped={SkippedCount}.",
+                    clients.Count, modules.Count, failures.Count, skipped);
 
                 if (failures.Count > 0) {
                     var message = string.Join(Environment.NewLine, failures.Distinct());
