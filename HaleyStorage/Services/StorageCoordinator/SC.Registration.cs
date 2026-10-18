@@ -3,6 +3,7 @@ using Haley.Enums;
 using Haley.Models;
 using Haley.Utils;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Xml;
 using static Haley.Internal.IndexingQueries;
@@ -32,7 +33,11 @@ namespace Haley.Services {
         /// Clients are purely a hierarchy node; all physical storage is owned by workspaces.
         /// </summary>
         /// <param name="password">Plaintext password; defaults to <c>"admin"</c> when null.</param>
-        public async Task<IFeedback> RegisterClient(IVaultObject client, string password = null, bool addDefaultModule = false) {
+        public Task<IFeedback> RegisterClient(IVaultObject client, string password = null, bool addDefaultModule = false) {
+            return RegisterClientInternal(client, password, addDefaultModule, createOnly: false);
+        }
+
+        async Task<IFeedback> RegisterClientInternal(IVaultObject client, string password, bool addDefaultModule, bool createOnly) {
             if (client == null) return new Feedback(false, "Name cannot be empty");
             if (!client.TryValidate(out var msg)) return new Feedback(false, msg);
             if (string.IsNullOrWhiteSpace(password)) password = DEFAULTPWD;
@@ -45,7 +50,7 @@ namespace Haley.Services {
             var result = new Feedback(true, $"Client {client.DisplayName} is registered");
             if (Indexer == null)
                 return result.SetStatus(false).SetMessage("Storage registry indexer is not configured; client registration cannot be persisted.");
-            var idxResult = await Indexer.RegisterClient(clientInfo);
+            var idxResult = await Indexer.RegisterClient(clientInfo, createOnly);
             if (idxResult?.Status != true)
                 return result.SetStatus(false).SetMessage(idxResult?.Message ?? $"Unable to register client {client.DisplayName}.");
             result.Result = idxResult.Result;
@@ -167,7 +172,8 @@ namespace Haley.Services {
         /// <summary>
         /// Reads the <c>Seed:sources</c> configuration section (or the provided <paramref name="section"/>)
         /// and registers all clients, modules, and workspaces declared there.
-        /// Deduplicates registrations within a single call.
+        /// Ensures every named client exists, even when its optional password is omitted.
+        /// Preserves existing client details and credentials; deduplicates registrations within a single call.
         /// </summary>
         /// <param name="section">Optional override section; reads from app config when null.</param>
         public async Task<IFeedback> RegisterFromSource(IConfigurationSection section = null) {
@@ -186,55 +192,73 @@ namespace Haley.Services {
                 var modules = new List<string>();
                 var wspaces = new List<string>();
                 var failures = new List<string>();
+                var skipped = 0;
 
                 foreach (var source in sourceList) {
                     if (string.IsNullOrWhiteSpace(source.Client)) continue;
                     var cliKey = source.Client.ToDBName();
-                    if (!clients.Contains(cliKey)) {
-                        if (!string.IsNullOrWhiteSpace(source.Password)) {
-                            var clientResult = await RegisterClient(source.Client, source.Password);
+                    try {
+                        if (!clients.Contains(cliKey)) {
+                            var clientResult = await RegisterClientInternal(new VaultObject(source.Client), source.Password,
+                                addDefaultModule: false, createOnly: true);
                             if (clientResult?.Status != true) {
                                 failures.Add(clientResult?.Message ?? $"Unable to register client '{source.Client}'.");
                                 continue;
                             }
+                            clients.Add(cliKey);
                         }
-                        clients.Add(cliKey);
-                    }
 
-                    if (string.IsNullOrWhiteSpace(source.Module)) continue;
-                    var modKey = $"{cliKey}_{source.Module.ToDBName()}";
-                    if (!modules.Contains(modKey)) {
-                        var moduleResult = await RegisterModule(source.Module, source.Client);
-                        if (moduleResult?.Status != true) {
-                            failures.Add(moduleResult?.Message ?? $"Unable to register module '{source.Module}'.");
+                        if (string.IsNullOrWhiteSpace(source.Module)) continue;
+                        var modKey = $"{cliKey}_{source.Module.ToDBName()}";
+                        if (!modules.Contains(modKey)) {
+                            var moduleResult = await RegisterModule(source.Module, source.Client);
+                            if (moduleResult?.Status != true) {
+                                failures.Add(moduleResult?.Message ?? $"Unable to register module '{source.Module}'.");
+                                continue;
+                            }
+                            modules.Add(modKey);
+                        }
+
+                        if (string.IsNullOrWhiteSpace(source.Workspace)) {
+                            var workspaceResult = await RegisterWorkSpace(null, source.Client, source.Module, source.Control, source.Parse, providerKey: source.ProviderKey, caseSensitive: source.CaseSensitive);
+                            if (workspaceResult?.Status != true)
+                                failures.Add(workspaceResult?.Message ?? $"Unable to register the default workspace for '{source.Client}/{source.Module}'.");
                             continue;
                         }
-                        modules.Add(modKey);
-                    }
-
-                    if (string.IsNullOrWhiteSpace(source.Workspace)) {
-                        var workspaceResult = await RegisterWorkSpace(null, source.Client, source.Module, source.Control, source.Parse, providerKey: source.ProviderKey, caseSensitive: source.CaseSensitive);
-                        if (workspaceResult?.Status != true)
-                            failures.Add(workspaceResult?.Message ?? $"Unable to register the default workspace for '{source.Client}/{source.Module}'.");
-                        continue;
-                    }
-                    var wsKey = $"{modKey}_{source.Workspace.ToDBName()}";
-                    if (!wspaces.Contains(wsKey)) {
-                        var workspaceResult = await RegisterWorkSpace(source.Workspace, source.Client, source.Module, source.Control, source.Parse, source.IsVirtual, source.ProviderKey, source.CaseSensitive);
-                        if (workspaceResult?.Status != true) {
-                            failures.Add(workspaceResult?.Message ?? $"Unable to register workspace '{source.Workspace}'.");
-                            continue;
+                        var wsKey = $"{modKey}_{source.Workspace.ToDBName()}";
+                        if (!wspaces.Contains(wsKey)) {
+                            var workspaceResult = await RegisterWorkSpace(source.Workspace, source.Client, source.Module, source.Control, source.Parse, source.IsVirtual, source.ProviderKey, source.CaseSensitive);
+                            if (workspaceResult?.Status != true) {
+                                failures.Add(workspaceResult?.Message ?? $"Unable to register workspace '{source.Workspace}'.");
+                                continue;
+                            }
+                            wspaces.Add(wsKey);
                         }
-                        wspaces.Add(wsKey);
+                    } catch (StorageRegistrationTargetNotFoundException ex) {
+                        // A missing parent must not prevent a later source from creating that identity.
+                        if (ex.ObjectType == VaultObjectType.Client)
+                            clients.Remove(cliKey);
+                        else if (ex.ObjectType == VaultObjectType.Module)
+                            modules.Remove($"{cliKey}_{source.Module.ToDBName()}");
+                        skipped++;
+                        _logger?.LogWarning(
+                            "Skipping startup source for client {Client}, module {Module}, workspace {Workspace}: {Reason}",
+                            source.Client, source.Module, source.Workspace ?? VaultConstants.DEFAULT_NAME, ex.Message);
                     }
                 }
 
                 await InitializePersistedRegistryState();
 
-                if (failures.Count > 0)
-                    return result.SetStatus(false).SetMessage(string.Join(Environment.NewLine, failures.Distinct()));
-                return result.SetStatus(true).SetMessage("Successfully registered.");
+                if (failures.Count > 0) {
+                    var message = string.Join(Environment.NewLine, failures.Distinct());
+                    _logger?.LogError("Storage startup source registration failed: {Reason}", message);
+                    return result.SetStatus(false).SetMessage(message);
+                }
+                return result.SetStatus(true).SetMessage(skipped == 0
+                    ? "Successfully registered."
+                    : $"Startup registration completed; skipped {skipped} source(s) whose client or module was not found.");
             } catch (Exception ex) {
+                _logger?.LogError(ex, "Storage startup source registration failed.");
                 return new Feedback(false, ex.Message);
             }
         }

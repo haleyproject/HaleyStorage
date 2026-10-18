@@ -24,7 +24,7 @@ namespace Haley.Services {
         Task DeleteLatestDirectoryThumbnail(IVaultReadRequest request, DeletedDocumentInfo document);
         Task<DeletedDocumentInfo> PrepareDirectoryThumbnailPurge(IVaultReadRequest request, string rootCuid);
         Task CompleteDirectoryThumbnailPurge(IVaultReadRequest request, DeletedDocumentInfo document);
-        Task<IFeedback> RegisterClient(IVaultClient info);
+        Task<IFeedback> RegisterClient(IVaultClient info, bool createOnly = false);
         Task<IFeedback> RegisterModule(IVaultModule info);
         Task<IFeedback> RegisterWorkspace(IVaultWorkSpace info);
         Task<(long id, Guid guid)> RegisterDocuments(IVaultReadRequest request, IVaultStorable holder);

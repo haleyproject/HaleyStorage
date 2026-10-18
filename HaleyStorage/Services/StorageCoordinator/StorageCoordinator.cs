@@ -125,6 +125,13 @@ namespace Haley.Services {
         }
 
         /// <summary>
+        /// Creates a configured coordinator with startup and runtime diagnostics sent to the supplied logger.
+        /// </summary>
+        public static IStorageCoordinator Create(IAdapterGateway agw, string adapter_key, IConfiguration configuration, out (string logpath, string respMode) data, bool throwExceptions, ILogger logger) {
+            return CreateConfigured(agw, adapter_key, out data, throwExceptions, registerConfiguredSources: true, configuration, logger);
+        }
+
+        /// <summary>
         /// Creates a configured coordinator without registering identities from
         /// <c>Seed:OSSSource</c>. Intended for management processes that discover the
         /// complete hierarchy from the persisted registry.
@@ -141,7 +148,7 @@ namespace Haley.Services {
             return CreateConfigured(agw, adapter_key, out data, throwExceptions, registerConfiguredSources: false, configuration);
         }
 
-        static IStorageCoordinator CreateConfigured(IAdapterGateway agw, string adapter_key, out (string logpath,string respMode) data, bool throwExceptions, bool registerConfiguredSources, IConfiguration configuration = null) {
+        static IStorageCoordinator CreateConfigured(IAdapterGateway agw, string adapter_key, out (string logpath,string respMode) data, bool throwExceptions, bool registerConfiguredSources, IConfiguration configuration = null, ILogger logger = null) {
             data = (null, null);
             var cfgRoot = configuration ?? ResourceUtils.GenerateConfigurationRoot();
             var dirPath = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? VaultConstants.CONFIG_DIR_WIN : VaultConstants.CONFIG_DIR_LINUX;
@@ -158,7 +165,7 @@ namespace Haley.Services {
             if (dirInfo != null && dirInfo!.TryGetValue("log", out var logObj)) logPath = logObj.ToString();
             if (dirInfo != null && dirInfo!.TryGetValue("path", out var storageObj)) storagePath = storageObj.ToString();
 
-            var dss = new StorageCoordinator(agw, adapter_key, storagePath, writemode,throwExceptions:throwExceptions);
+            var dss = new StorageCoordinator(agw, adapter_key, storagePath, writemode, logger:logger, throwExceptions:throwExceptions);
             var ossConfig = cfgRoot.GetSection($@"Seed:{VaultConstants.OSS_CONFIG}")?.Get<StorageRegistryConfig>();
             if (ossConfig != null) dss.SetConfig(ossConfig);
             if (registerConfiguredSources) {
