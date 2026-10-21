@@ -98,7 +98,7 @@ namespace Haley.Utils {
                 }
 
                 var documentDeleteState = docRow.GetInt("delete_state");
-                var documentDeleted = docRow.GetDateTime("deleted");
+                var documentDeleted = ReadUtcDateTime(docRow, "deleted");
                 var latestVersion = versionRows.FirstOrDefault();
                 var effectiveDeleteState = documentDeleteState > 0
                     ? documentDeleteState
@@ -108,7 +108,7 @@ namespace Haley.Utils {
                 var effectiveDeleted = documentDeleteState > 0
                     ? documentDeleted
                     : effectiveDeleteState > 0
-                        ? latestVersion?.GetDateTime("deleted")
+                        ? ReadUtcDateTime(latestVersion, "deleted")
                         : null;
                 var workspaceId = docRow.GetLong("workspace_id");
                 var workspace = GetAllComponents<VaultWorkSpace>().FirstOrDefault(candidate => candidate.Id == workspaceId);
@@ -119,7 +119,7 @@ namespace Haley.Utils {
 
                 foreach (var row in versionRows) {
                     var versionDeleteState = row.GetInt("delete_state");
-                    response.Versions.Add(new VaultFileVersionInfo { VersionId = row.GetLong("version_id"), VersionCuid = row.GetString("version_cuid") ?? string.Empty, VersionNumber = row.GetInt("version_no"), ActorId = row.GetLong("actor_id"), DeleteState = versionDeleteState, IsDeleted = versionDeleteState > 0, Deleted = row.GetDateTime("deleted"), Created = row.GetDateTime("version_created"), Size = row.GetNullableLong("size"), StorageName = row.GetString("storage_name") ?? string.Empty, StorageRef = row.GetString("storage_ref") ?? string.Empty, StagingRef = row.GetString("staging_ref") ?? string.Empty, Flags = row.GetInt("flags"), Hash = row.GetString("hash") ?? string.Empty, SyncedAt = row.GetDateTime("synced_at"), Metadata = row.GetString("metadata") ?? string.Empty });
+                    response.Versions.Add(new VaultFileVersionInfo { VersionId = row.GetLong("version_id"), VersionCuid = row.GetString("version_cuid") ?? string.Empty, VersionNumber = row.GetInt("version_no"), ActorId = row.GetLong("actor_id"), DeleteState = versionDeleteState, IsDeleted = versionDeleteState > 0, Deleted = ReadUtcDateTime(row, "deleted"), Created = ReadUtcDateTime(row, "version_created"), Size = row.GetNullableLong("size"), StorageName = row.GetString("storage_name") ?? string.Empty, StorageRef = row.GetString("storage_ref") ?? string.Empty, StagingRef = row.GetString("staging_ref") ?? string.Empty, Flags = row.GetInt("flags"), Hash = row.GetString("hash") ?? string.Empty, SyncedAt = ReadUtcDateTime(row, "synced_at"), Metadata = row.GetString("metadata") ?? string.Empty });
                 }
 
                 return fb.SetStatus(true).SetResult(response);
@@ -194,7 +194,7 @@ namespace Haley.Utils {
             var deleteState = row.GetInt("delete_state");
             var documentDeleteState = row.GetNullableInt("document_delete_state");
             var versionDeleteState = row.GetNullableInt("version_delete_state");
-            return new VaultBrowseItem { IsHidden = row.GetInt("is_hidden") > 0, ItemType = row.GetString("item_type") ?? string.Empty, Id = row.GetLong("id"), Cuid = row.GetString("uid") ?? string.Empty, DisplayName = row.GetString("display_name") ?? string.Empty, ActorId = row.GetNullableLong("actor_id"), ParentId = row.GetLong("parent_id"), VirtualPath = row.GetString("virtual_path") ?? string.Empty, DeleteState = deleteState, IsDeleted = deleteState > 0, Deleted = row.GetDateTime("deleted"), DocumentDeleteState = documentDeleteState, DocumentIsDeleted = documentDeleteState > 0, DocumentDeleted = row.GetDateTime("document_deleted"), LatestVersionDeleteState = versionDeleteState, LatestVersionIsDeleted = versionDeleteState > 0, LatestVersionDeleted = row.GetDateTime("version_deleted"), Created = row.GetDateTime("created"), Modified = row.GetDateTime("modified"), LatestVersionId = row.GetNullableLong("version_id"), LatestVersionCuid = row.GetString("version_cuid") ?? string.Empty, LatestVersionNumber = row.GetNullableInt("version_no"), VersionCount = row.GetNullableInt("version_count"), HasThumbnail = row.GetInt("has_thumbnail") > 0, LatestVersionCreated = row.GetDateTime("version_created"), Size = row.GetNullableLong("size"), StorageName = row.GetString("storage_name") ?? string.Empty, StagingRef = row.GetString("staging_ref") ?? string.Empty, StorageRef = row.GetString("storage_ref") ?? string.Empty, Flags = row.GetNullableInt("flags"), Hash = row.GetString("hash") ?? string.Empty, SyncedAt = row.GetDateTime("synced_at") };
+            return new VaultBrowseItem { IsHidden = row.GetInt("is_hidden") > 0, ItemType = row.GetString("item_type") ?? string.Empty, Id = row.GetLong("id"), Cuid = row.GetString("uid") ?? string.Empty, DisplayName = row.GetString("display_name") ?? string.Empty, ActorId = row.GetNullableLong("actor_id"), ParentId = row.GetLong("parent_id"), VirtualPath = row.GetString("virtual_path") ?? string.Empty, DeleteState = deleteState, IsDeleted = deleteState > 0, Deleted = ReadUtcDateTime(row, "deleted"), DocumentDeleteState = documentDeleteState, DocumentIsDeleted = documentDeleteState > 0, DocumentDeleted = ReadUtcDateTime(row, "document_deleted"), LatestVersionDeleteState = versionDeleteState, LatestVersionIsDeleted = versionDeleteState > 0, LatestVersionDeleted = ReadUtcDateTime(row, "version_deleted"), Created = ReadUtcDateTime(row, "created"), Modified = ReadUtcDateTime(row, "modified"), LatestVersionId = row.GetNullableLong("version_id"), LatestVersionCuid = row.GetString("version_cuid") ?? string.Empty, LatestVersionNumber = row.GetNullableInt("version_no"), VersionCount = row.GetNullableInt("version_count"), HasThumbnail = row.GetInt("has_thumbnail") > 0, LatestVersionCreated = ReadUtcDateTime(row, "version_created"), Size = row.GetNullableLong("size"), StorageName = row.GetString("storage_name") ?? string.Empty, StagingRef = row.GetString("staging_ref") ?? string.Empty, StorageRef = row.GetString("storage_ref") ?? string.Empty, Flags = row.GetNullableInt("flags"), Hash = row.GetString("hash") ?? string.Empty, SyncedAt = ReadUtcDateTime(row, "synced_at") };
         }
 
         static string ApplyFolderListingOptions(string sql, string alias, VaultFolderSortMode sort, VaultSortDirection direction, VaultFolderItemKind kind) {

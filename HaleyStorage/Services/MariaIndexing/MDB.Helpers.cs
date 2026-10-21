@@ -12,6 +12,12 @@ namespace Haley.Utils {
     /// <c>InsertAndFetchID*</c> check-then-insert pattern.
     /// </summary>
     internal partial class MariaDBIndexing {
+        static DateTime? ReadUtcDateTime(DbRow row, string key) {
+            var value = row?.GetDateTime(key);
+            // Preserve the database's UTC clock value while making its timezone explicit.
+            return value.HasValue ? ToUtcOffset(value).UtcDateTime : null;
+        }
+
         /// <summary>
         /// Thread-safe one-shot validation: runs <see cref="CreateCoreDB"/> the first time it is called.
         /// Subsequent calls are no-ops, guarded by a <see cref="SemaphoreSlim"/>.
